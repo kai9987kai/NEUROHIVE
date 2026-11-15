@@ -11,8 +11,9 @@
 
 - **NeuroCore:** replication planning, digital-twin blueprint tracking, and phase control.
 - **MaterialCore:** inventory, bill of materials, material conservation, and planning strategies (`standard`, `reserved_bom`, `auto_resupply`).
-- **SwarmCore:** role-specialised agents (`FAB-01/02`, `SYS-01`, `ASM-01/02`, `QA-01`, and optional `MNT-01` maintenance/repair robot) operating across a 12×8 spatial factory grid.
-- **FabricationCore:** component production across dedicated stations (`DEPOT`, `FAB_BAY`, `SYS_LAB`, `ASM_DOCK`, `QA_CELL`, `HIVE_PAD`, `CHARGER`) with energy and travel physics.
+- **SwarmCore:** role-specialised agents (`FAB-01/02`, `SYS-01`, `ASM-01/02`, `QA-01`, plus optional `MNT-01` repair bot, `LOG-01` logistics convoy bot, and live dynamic bot spawning) operating across a 12×8 spatial factory grid.
+- **FabricationCore & Thermal/Power Systems:** component production across dedicated stations (`DEPOT`, `FAB_BAY`, `SYS_LAB`, `ASM_DOCK`, `QA_CELL`, `HIVE_PAD`, `CHARGER`) with travel physics, station thermal heat/coolant dynamics, facility microgrid load telemetry, and 2x Overclock mode.
+- **Live Continuous Mode (`--continuous`):** non-stop infinite generational replication (`NH-A → NH-B → NH-C → ...`) with automatic BOM replenishment, dynamic tick-budget extension, generational firmware evolution (`v1.x.0`), Swarm Intelligence Index, and rolling event/history pruning.
 - **HiveNet:** task dispatch, live telemetry snapshots, and filterable coordination event traces.
 - **Verification:** self-test and safety-validation gates before commissioning.
 - **Reliability & Fault Injection:** deterministic recoverable delays (`--fault-rate`), permanent hardware faults (`--permanent-fault-rate`) repaired by `MNT-01` or internal diagnostics, and live interactive fault/supply injection.
@@ -25,14 +26,14 @@ The model deliberately treats motors, batteries, compute modules and electronic 
 ### 1. Live Interactive Web Dashboard (Browser)
 
 ```powershell
-python neurohive.py --web
+python neurohive.py --web --continuous
 ```
 
-Opens a live interactive dashboard at `http://127.0.0.1:8765/` featuring:
-- 60fps HTML5 `<canvas>` 2D Spatial Factory Floor with interpolated agent motion, animated logistics links, particle bursts, and hover telemetry tooltips.
-- Interactive SVG Hive Lineage graph and 13-cell Digital Twin Blueprint matrix.
-- Real-time multi-series telemetry chart (`Busy %`, `Stock %`, `Avg Energy %`).
-- Live playback (`Play/Pause`, `Step +1`, `Step +5`, speed slider), fault injection, BOM supply drops, JSON export, and Parameter Sweep Benchmark dialog.
+Opens a live interactive dashboard (auto-selecting an open port if `8765` is busy, e.g. `http://127.0.0.1:8790/`) featuring:
+- 60fps HTML5 `<canvas>` 2D Spatial Factory Floor with interpolated agent motion, live station thermal badges (`°C`), animated logistics links, overclock overdrive auras, particle bursts, and hover telemetry tooltips.
+- Interactive SVG Hive Lineage graph (rolling window for continuous runs) and 13-cell Digital Twin Blueprint matrix.
+- Real-time multi-series telemetry chart (`Busy %`, `Stock %`, `Energy %`, `Thermal %`).
+- Live playback (`Play/Pause`, `Step +1`, `Step +5`, speed slider), **∞ Continuous Mode**, **Overclock (2x)**, **Coolant Flush**, **+ Spawn Bot**, fault injection, BOM supply drops, JSON export, and Parameter Sweep Benchmark dialog.
 
 ### 2. Native Desktop GUI (Tkinter)
 
@@ -66,7 +67,7 @@ python neurohive.py --sweep --generations 2
 python -m unittest discover -s tests -v
 ```
 
-Thirteen unit tests cover core replication, determinism, material conservation, invalid parameter rejection, fault recovery, `snapshot()` schema, resource strategies (`reserved_bom`, `auto_resupply`, manual `resupply`), maintenance repair, spatial travel physics, parameter sweeps, the HTTP Web Dashboard API, and Tkinter GUI initialization.
+Fifteen unit tests cover core replication, determinism, material conservation, invalid parameter rejection, fault recovery, `snapshot()` schema, resource strategies (`reserved_bom`, `auto_resupply`, manual `resupply`), maintenance repair, spatial travel physics, parameter sweeps, continuous non-stop replication, overclocking/thermal/coolant/microgrid & dynamic agent spawning, the HTTP Web Dashboard API, and Tkinter GUI initialization.
 
 ## Model architecture
 

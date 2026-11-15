@@ -28,6 +28,8 @@ class SimulationController:
         enable_travel_ticks: bool = False,
         max_ticks: int = 2000,
         maintenance_bot: bool = False,
+        continuous_mode: bool = False,
+        overclock_active: bool = False,
     ):
         self._lock = threading.Lock()
         self.params: Dict[str, Any] = {
@@ -39,19 +41,22 @@ class SimulationController:
             "enable_travel_ticks": enable_travel_ticks,
             "max_ticks": max_ticks,
             "maintenance_bot": maintenance_bot,
+            "continuous_mode": continuous_mode,
+            "overclock_active": overclock_active,
         }
         self.sim = self._build_sim(self.params)
 
     @staticmethod
     def _build_sim(params: Dict[str, Any]) -> NeuroHiveSimulation:
         agent_counts = None
-        if params.get("maintenance_bot"):
+        if params.get("maintenance_bot") or params.get("logistics_bot"):
             agent_counts = {
                 "fabricator": 2,
                 "systems": 1,
                 "assembler": 2,
                 "inspector": 1,
-                "maintenance": 1,
+                "maintenance": 1 if params.get("maintenance_bot") else 0,
+                "logistics": 1 if params.get("logistics_bot") else 0,
             }
         return NeuroHiveSimulation(
             seed=int(params.get("seed", 42)),
@@ -62,6 +67,8 @@ class SimulationController:
             resource_strategy=str(params.get("resource_strategy", "standard")),
             enable_travel_ticks=bool(params.get("enable_travel_ticks", False)),
             agent_counts=agent_counts,
+            continuous_mode=bool(params.get("continuous_mode", False)),
+            overclock_active=bool(params.get("overclock_active", False)),
         )
 
     def get_state(self) -> dict:
@@ -102,6 +109,28 @@ class SimulationController:
         with self._lock:
             added = self.sim.resupply(multiplier=int(multiplier))
             return {"added": added, "state": self.sim.snapshot()}
+
+    def set_continuous_mode(self, enabled: bool) -> dict:
+        with self._lock:
+            self.params["continuous_mode"] = bool(enabled)
+            result = self.sim.set_continuous_mode(bool(enabled))
+            return {"result": result, "state": self.sim.snapshot()}
+
+    def set_overclock(self, enabled: bool) -> dict:
+        with self._lock:
+            self.params["overclock_active"] = bool(enabled)
+            result = self.sim.set_overclock(bool(enabled))
+            return {"result": result, "state": self.sim.snapshot()}
+
+    def coolant_flush(self) -> dict:
+        with self._lock:
+            temps = self.sim.coolant_flush()
+            return {"station_temps": temps, "state": self.sim.snapshot()}
+
+    def spawn_agent(self, role: str) -> dict:
+        with self._lock:
+            agent = self.sim.spawn_agent(role)
+            return {"agent": agent, "state": self.sim.snapshot()}
 
     def sweep(self, params: Optional[Dict[str, Any]] = None) -> dict:
         with self._lock:
@@ -199,6 +228,25 @@ class NeuroHiveRequestHandler(BaseHTTPRequestHandler):
             if self.path == "/api/resupply":
                 multiplier = int(body.get("multiplier", 1))
                 self._send_json(self.controller.resupply(multiplier))
+                return
+
+            if self.path == "/api/continuous":
+                enabled = bool(body.get("enabled", True))
+                self._send_json(self.controller.set_continuous_mode(enabled))
+                return
+
+            if self.path == "/api/overclock":
+                enabled = bool(body.get("enabled", True))
+                self._send_json(self.controller.set_overclock(enabled))
+                return
+
+            if self.path == "/api/coolant":
+                self._send_json(self.controller.coolant_flush())
+                return
+
+            if self.path == "/api/spawn-agent":
+                role = str(body.get("role", "fabricator"))
+                self._send_json(self.controller.spawn_agent(role))
                 return
 
             if self.path == "/api/sweep":

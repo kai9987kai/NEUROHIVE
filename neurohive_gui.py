@@ -42,6 +42,7 @@ ROLE_COLORS = {
     "assembler": "#34d399",
     "inspector": "#fb7185",
     "maintenance": "#f59e0b",
+    "logistics": "#38bdf8",
 }
 
 
@@ -58,6 +59,8 @@ class NeuroHiveApp:
         resource_strategy: str = "standard",
         enable_travel_ticks: bool = False,
         max_ticks: int = 2000,
+        continuous_mode: bool = False,
+        overclock_active: bool = False,
     ):
         self.root = root
         self.root.title("NeuroHive 1.0 — Live Multi-Agent Replication Studio")
@@ -80,6 +83,10 @@ class NeuroHiveApp:
         self.var_strategy = tk.StringVar(value=resource_strategy)
         self.var_travel = tk.BooleanVar(value=enable_travel_ticks)
         self.var_maint = tk.BooleanVar(value=False)
+        self.var_logistics = tk.BooleanVar(value=False)
+        self.var_continuous = tk.BooleanVar(value=continuous_mode)
+        self.var_overclock = tk.BooleanVar(value=overclock_active)
+        self.var_spawn_role = tk.StringVar(value="fabricator")
         self.var_max_ticks = tk.IntVar(value=max_ticks)
         self.var_speed_ms = tk.IntVar(value=180)
         self.var_event_filter = tk.StringVar(value="ALL")
@@ -94,13 +101,14 @@ class NeuroHiveApp:
 
     def _create_simulation(self) -> NeuroHiveSimulation:
         agent_counts = None
-        if self.var_maint.get():
+        if self.var_maint.get() or self.var_logistics.get():
             agent_counts = {
                 "fabricator": 2,
                 "systems": 1,
                 "assembler": 2,
                 "inspector": 1,
-                "maintenance": 1,
+                "maintenance": 1 if self.var_maint.get() else 0,
+                "logistics": 1 if self.var_logistics.get() else 0,
             }
         return NeuroHiveSimulation(
             seed=int(self.var_seed.get()),
@@ -111,6 +119,8 @@ class NeuroHiveApp:
             resource_strategy=self.var_strategy.get(),
             enable_travel_ticks=bool(self.var_travel.get()),
             agent_counts=agent_counts,
+            continuous_mode=bool(self.var_continuous.get()),
+            overclock_active=bool(self.var_overclock.get()),
         )
 
     def _sync_visual_positions(self, snap: bool = False) -> None:
@@ -246,10 +256,27 @@ class NeuroHiveApp:
         strat_box.pack(side="left", padx=(0, 8))
 
         ttk.Checkbutton(
+            param_row,
+            text="∞ Continuous Mode",
+            variable=self.var_continuous,
+            command=self.toggle_continuous_mode,
+            style="NH.TCheckbutton",
+        ).pack(side="left", padx=4)
+        ttk.Checkbutton(
+            param_row,
+            text="Overclock (2x)",
+            variable=self.var_overclock,
+            command=self.toggle_overclock,
+            style="NH.TCheckbutton",
+        ).pack(side="left", padx=4)
+        ttk.Checkbutton(
             param_row, text="Travel Physics", variable=self.var_travel, style="NH.TCheckbutton"
         ).pack(side="left", padx=4)
         ttk.Checkbutton(
-            param_row, text="MNT-01 Repair Bot", variable=self.var_maint, style="NH.TCheckbutton"
+            param_row, text="MNT-01 Repair", variable=self.var_maint, style="NH.TCheckbutton"
+        ).pack(side="left", padx=4)
+        ttk.Checkbutton(
+            param_row, text="LOG-01 Convoy", variable=self.var_logistics, style="NH.TCheckbutton"
         ).pack(side="left", padx=4)
 
         # Action button row
@@ -267,6 +294,9 @@ class NeuroHiveApp:
             side="left", padx=4
         )
         ttk.Button(
+            btn_row, text="Coolant Flush", command=self.flush_coolant, style="NH.TButton"
+        ).pack(side="left", padx=4)
+        ttk.Button(
             btn_row, text="Inject Fault", command=lambda: self.inject_fault(False), style="NH.TButton"
         ).pack(side="left", padx=4)
         ttk.Button(
@@ -275,6 +305,16 @@ class NeuroHiveApp:
         ttk.Button(
             btn_row, text="Supply Drop (+1 BOM)", command=self.resupply_bom, style="NH.TButton"
         ).pack(side="left", padx=4)
+        ttk.Combobox(
+            btn_row,
+            textvariable=self.var_spawn_role,
+            values=["fabricator", "systems", "assembler", "inspector", "maintenance", "logistics"],
+            width=11,
+            state="readonly",
+        ).pack(side="left", padx=(6, 2))
+        ttk.Button(
+            btn_row, text="+ Spawn Bot", command=self.spawn_bot, style="NH.TButton"
+        ).pack(side="left", padx=2)
         ttk.Button(
             btn_row, text="Run Sweep", command=self.show_sweep_modal, style="NH.TButton"
         ).pack(side="left", padx=4)
@@ -521,6 +561,27 @@ class NeuroHiveApp:
         self.sim.resupply(1)
         self.refresh_ui()
 
+    def toggle_continuous_mode(self) -> None:
+        enabled = bool(self.var_continuous.get())
+        self.sim.set_continuous_mode(enabled)
+        if enabled and not self.playing:
+            self.playing = True
+            self.btn_play.configure(text="Pause")
+        self.refresh_ui()
+
+    def toggle_overclock(self) -> None:
+        self.sim.set_overclock(bool(self.var_overclock.get()))
+        self.refresh_ui()
+
+    def flush_coolant(self) -> None:
+        self.sim.coolant_flush()
+        self.refresh_ui()
+
+    def spawn_bot(self) -> None:
+        self.sim.spawn_agent(self.var_spawn_role.get())
+        self._sync_visual_positions(snap=False)
+        self.refresh_ui()
+
     def export_json(self) -> None:
         path = filedialog.asksaveasfilename(
             defaultextension=".json",
@@ -627,8 +688,10 @@ class NeuroHiveApp:
         self.lbl_status_pill.configure(text=status, bg=pill_color)
 
         target = snap["current_target"] or "NONE"
+        mode_tag = "∞ CONTINUOUS" if snap.get("continuous_mode") else "FINITE"
+        oc_tag = " | OVERCLOCK 2x" if snap.get("overclock_active") else ""
         self.lbl_phase_banner.configure(
-            text=f"PHASE: {snap['phase'].upper()}  |  TARGET: {target}"
+            text=f"{mode_tag}{oc_tag}  |  PHASE: {snap['phase'].upper()}  |  TARGET: {target}"
         )
 
         self.kpi_labels["tick"].configure(text=f"{snap['tick']}/{snap['max_ticks']}")
@@ -688,29 +751,38 @@ class NeuroHiveApp:
             c.create_line(x1, y1, x2, y2, fill="#1f2c47", dash=(4, 4), width=2)
 
         active_stations = {
-            a.station for a in self.sim.agents if a.status in ("working", "repairing")
+            a.station
+            for a in self.sim.agents
+            if a.status in ("working", "repairing", "delivering")
         }
 
         # Draw station zones
         for sid, info in STATIONS.items():
             px, py = to_px(info["x"], info["y"])
+            temp = self.sim.station_temps.get(sid, 22.0)
+            hot = temp >= 68.0
+            warm = temp >= 45.0
             pulse = 4.0 * math.sin(self.anim_phase * 1.5) if sid in active_stations else 0.0
             rx, ry = 46 + pulse, 28 + pulse * 0.6
-            outline = info["color"] if sid in active_stations else "#314266"
-            width = 2 if sid in active_stations else 1
+            outline = (
+                THEME["crimson"]
+                if hot
+                else (THEME["amber"] if warm else (info["color"] if sid in active_stations else "#314266"))
+            )
+            width = 2 if (sid in active_stations or hot) else 1
             c.create_rectangle(
                 px - rx,
                 py - ry,
                 px + rx,
                 py + ry,
-                fill="#111a2f",
+                fill="#29121a" if hot else "#111a2f",
                 outline=outline,
                 width=width,
             )
             c.create_text(
                 px,
                 py - ry + 11,
-                text=sid,
+                text=f"{sid} {temp:.0f}°C",
                 fill=info["color"],
                 font=("Consolas", 8, "bold"),
             )
@@ -741,7 +813,7 @@ class NeuroHiveApp:
                 st_x, st_y = to_px(
                     STATIONS[agent.station]["x"], STATIONS[agent.station]["y"]
                 )
-                if agent.status == "working":
+                if agent.status in ("working", "repairing", "delivering"):
                     c.create_line(
                         px,
                         py,
@@ -756,6 +828,7 @@ class NeuroHiveApp:
                     "working": THEME["cyan"],
                     "moving": THEME["violet"],
                     "repairing": THEME["amber"],
+                    "delivering": "#38bdf8",
                     "offline": THEME["crimson"],
                     "idle": THEME["emerald"],
                 }.get(agent.status, THEME["muted"])
@@ -819,9 +892,9 @@ class NeuroHiveApp:
         w = max(c.winfo_width(), 640)
         c.delete("all")
 
-        hives = snap["hives"]
-        x_start = 34
-        step_x = min(135, max(86, (w - 80) // max(1, len(hives))))
+        hives = snap["hives"][-8:]
+        x_start = 42
+        step_x = min(135, max(82, (w - 80) // max(1, len(hives))))
         y_node = 44
 
         for i, hive in enumerate(hives):

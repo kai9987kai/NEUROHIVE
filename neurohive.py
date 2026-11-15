@@ -37,6 +37,16 @@ ROLE_HOME_STATION: Dict[str, str] = {
     "assembler": "ASM_DOCK",
     "inspector": "QA_CELL",
     "maintenance": "CHARGER",
+    "logistics": "DEPOT",
+}
+
+ROLE_PREFIXES: Dict[str, str] = {
+    "fabricator": "FAB",
+    "systems": "SYS",
+    "assembler": "ASM",
+    "inspector": "QA",
+    "maintenance": "MNT",
+    "logistics": "LOG",
 }
 
 TASK_STATIONS: Dict[str, str] = {
@@ -147,6 +157,9 @@ class Hive:
     commissioned_tick: Optional[int] = None
     capabilities: Dict[str, bool] = field(default_factory=dict)
     started_tick: int = 0
+    firmware_version: str = "v1.0.0"
+    quality_score: float = 100.0
+    build_duration_ticks: int = 0
     components_built: Dict[str, bool] = field(default_factory=dict)
     assembly_progress: Dict[str, bool] = field(default_factory=dict)
     verification_progress: Dict[str, bool] = field(default_factory=dict)
@@ -166,6 +179,8 @@ class NeuroHiveSimulation:
         enable_travel_ticks: bool = False,
         agent_counts: Optional[Dict[str, int]] = None,
         initial_stock: Optional[Dict[str, int]] = None,
+        continuous_mode: bool = False,
+        overclock_active: bool = False,
     ):
         if max_generations < 1:
             raise ValueError("max_generations must be at least 1")
@@ -188,6 +203,8 @@ class NeuroHiveSimulation:
         self.permanent_fault_rate = permanent_fault_rate
         self.resource_strategy = resource_strategy
         self.enable_travel_ticks = enable_travel_ticks
+        self.continuous_mode = bool(continuous_mode)
+        self.overclock_active = bool(overclock_active)
         self.max_ticks = max_ticks
         self.tick_count = 0
 
@@ -202,6 +219,16 @@ class NeuroHiveSimulation:
         self.total_resupplied: Dict[str, int] = {k: 0 for k in self.initial_stock}
 
         self.agents = self._build_agents(agent_counts)
+        self.station_temps: Dict[str, float] = {sid: 22.0 for sid in STATIONS}
+        self._thermal_warned: set[str] = set()
+        self.power_grid: Dict[str, object] = {
+            "solar_kw": 22.0,
+            "reactor_kw": 26.0,
+            "load_kw": 8.0,
+            "grid_storage_kwh": 320.0,
+            "max_storage_kwh": 500.0,
+            "overclock_active": self.overclock_active,
+        }
         origin_hive = Hive(
             "NH-A",
             0,
@@ -210,6 +237,9 @@ class NeuroHiveSimulation:
             commissioned_tick=0,
             capabilities=self._full_capabilities(),
             started_tick=0,
+            firmware_version="v1.0.0",
+            quality_score=100.0,
+            build_duration_ticks=0,
             components_built={k: True for k in COMPONENT_DURATIONS},
             assembly_progress={k: True for k in ASSEMBLY_TASKS},
             verification_progress={k: True for k in VERIFICATION_TASKS},
@@ -227,6 +257,9 @@ class NeuroHiveSimulation:
         self.total_faults = 0
         self.total_hard_faults = 0
         self.total_energy_used = 0.0
+        self._target_retries = 0
+        self._target_hard_faults = 0
+        self._logistics_cursor = 0
         self._start_next_replication()
         self._record_history()
 
@@ -242,15 +275,8 @@ class NeuroHiveSimulation:
                 ("QA-01", "inspector"),
             ]
         else:
-            role_prefixes = [
-                ("fabricator", "FAB"),
-                ("systems", "SYS"),
-                ("assembler", "ASM"),
-                ("inspector", "QA"),
-                ("maintenance", "MNT"),
-            ]
             specs = []
-            for role, prefix in role_prefixes:
+            for role, prefix in ROLE_PREFIXES.items():
                 count = int(agent_counts.get(role, 0))
                 if count < 0:
                     raise ValueError(f"Agent count for {role} cannot be negative")
@@ -296,9 +322,15 @@ class NeuroHiveSimulation:
 
     def _log(self, event: str, **data) -> None:
         self.events.append({"tick": self.tick_count, "event": event, **data})
+        if self.continuous_mode and len(self.events) > 2500:
+            del self.events[:-1500]
 
     def _record_history(self) -> None:
-        active_agents = sum(1 for a in self.agents if a.status in ("working", "moving", "repairing"))
+        active_agents = sum(
+            1
+            for a in self.agents
+            if a.status in ("working", "moving", "repairing", "delivering")
+        )
         avg_energy = (
             sum(a.energy for a in self.agents) / len(self.agents) if self.agents else 0.0
         )
@@ -308,6 +340,7 @@ class NeuroHiveSimulation:
             if total_avail > 0
             else 0.0
         )
+        peak_temp = max(self.station_temps.values()) if self.station_temps else 22.0
         self.history.append(
             {
                 "tick": self.tick_count,
@@ -315,12 +348,16 @@ class NeuroHiveSimulation:
                 "busy_pct": round(100.0 * active_agents / len(self.agents), 1),
                 "avg_energy": round(avg_energy, 1),
                 "stock_pct": stock_pct,
+                "peak_temp_c": round(peak_temp, 1),
+                "load_kw": self.power_grid["load_kw"],
                 "total_faults": self.total_faults,
                 "hard_faults": self.total_hard_faults,
                 "progress_pct": self._compute_progress_pct(),
                 "phase": self.phase,
             }
         )
+        if self.continuous_mode and len(self.history) > 2500:
+            del self.history[:-1500]
 
     def _compute_progress_pct(self) -> float:
         if self.phase == "complete":
@@ -337,10 +374,15 @@ class NeuroHiveSimulation:
             phase_frac = done_work / total_work if total_work > 0 else 0.0
         else:
             phase_frac = 0.0
+        if self.continuous_mode:
+            return round(min(100.0, 100.0 * (phase_base + phase_frac) / 3.0), 1)
         completed_units = self.completed_replications * 3.0 + phase_base + phase_frac
         return round(min(100.0, 100.0 * completed_units / total_steps), 1)
 
     def _start_next_replication(self) -> None:
+        if self.continuous_mode and self.completed_replications >= self.max_generations:
+            self.max_generations = self.completed_replications + 1
+
         if self.completed_replications >= self.max_generations:
             self.phase = "complete"
             for agent in self.agents:
@@ -349,10 +391,15 @@ class NeuroHiveSimulation:
                 agent.fault_flash = False
             return
 
-        if self.resource_strategy == "auto_resupply" and not self._materials_available(
-            SINGLE_HIVE_BOM
-        ):
-            self.resupply(1, reason="auto_resupply")
+        if (
+            self.continuous_mode or self.resource_strategy == "auto_resupply"
+        ) and not self._materials_available(SINGLE_HIVE_BOM):
+            self.resupply(
+                1,
+                reason="continuous_resupply"
+                if self.continuous_mode
+                else "auto_resupply",
+            )
 
         if self.resource_strategy == "reserved_bom" and not self._materials_available(
             SINGLE_HIVE_BOM
@@ -371,11 +418,15 @@ class NeuroHiveSimulation:
 
         parent = self.hives[-1]
         child_number = len(self.hives)
+        next_gen = parent.generation + 1
+        self._target_retries = 0
+        self._target_hard_faults = 0
         child = Hive(
             self._format_hive_id(child_number),
-            parent.generation + 1,
+            next_gen,
             parent.hive_id,
             started_tick=self.tick_count,
+            firmware_version=f"v1.{next_gen}.0",
             components_built={k: False for k in COMPONENT_DURATIONS},
             assembly_progress={k: False for k in ASSEMBLY_TASKS},
             verification_progress={k: False for k in VERIFICATION_TASKS},
@@ -401,6 +452,7 @@ class NeuroHiveSimulation:
             parent=parent.hive_id,
             child=child.hive_id,
             generation=child.generation,
+            firmware=child.firmware_version,
         )
         self._log(
             "digital_twin_created", hive=child.hive_id, blueprint_components=len(BOM)
@@ -413,13 +465,76 @@ class NeuroHiveSimulation:
 
     def _consume_materials(self, recipe: Dict[str, int]) -> bool:
         if not self._materials_available(recipe):
-            if self.resource_strategy == "auto_resupply":
-                self.resupply(1, reason="auto_resupply")
+            if self.continuous_mode or self.resource_strategy == "auto_resupply":
+                self.resupply(
+                    1,
+                    reason="continuous_resupply"
+                    if self.continuous_mode
+                    else "auto_resupply",
+                )
             if not self._materials_available(recipe):
                 return False
         for material, amount in recipe.items():
             self.stock[material] -= amount
         return True
+
+    def set_continuous_mode(self, enabled: bool) -> dict:
+        """Toggle live continuous replication mode without interrupting active runs."""
+        self.continuous_mode = bool(enabled)
+        self._log(
+            "continuous_mode_enabled"
+            if self.continuous_mode
+            else "continuous_mode_disabled"
+        )
+        if self.continuous_mode and self.phase == "complete" and not self.failed:
+            self.max_generations = self.completed_replications + 1
+            self.max_ticks = max(self.max_ticks, self.tick_count + 1000)
+            self._start_next_replication()
+        return {
+            "continuous_mode": self.continuous_mode,
+            "phase": self.phase,
+            "current_target": self.current_target.hive_id
+            if self.current_target
+            else None,
+        }
+
+    def set_overclock(self, enabled: bool) -> dict:
+        """Toggle swarm overclocking (2x work throughput at higher thermal & energy draw)."""
+        self.overclock_active = bool(enabled)
+        self.power_grid["overclock_active"] = self.overclock_active
+        self._log(
+            "overclock_enabled" if self.overclock_active else "overclock_disabled"
+        )
+        return {"overclock_active": self.overclock_active}
+
+    def coolant_flush(self) -> dict:
+        """Purge accumulated thermal load across all stations back to ambient 22.0°C."""
+        self.station_temps = {sid: 22.0 for sid in STATIONS}
+        self._thermal_warned.clear()
+        self._log("coolant_flush", ambient_c=22.0)
+        return dict(self.station_temps)
+
+    def spawn_agent(self, role: str) -> dict:
+        """Dynamically commission a new specialized agent into the active swarm."""
+        if role not in ROLE_PREFIXES:
+            raise ValueError(f"Unknown agent role: {role}")
+        prefix = ROLE_PREFIXES[role]
+        existing = sum(1 for a in self.agents if a.role == role)
+        agent_id = f"{prefix}-{existing + 1:02d}"
+        station = ROLE_HOME_STATION.get(role, "DEPOT")
+        coords = STATIONS[station]
+        agent = Agent(
+            agent_id=agent_id,
+            role=role,
+            x=coords["x"],
+            y=coords["y"],
+            target_x=coords["x"],
+            target_y=coords["y"],
+            station=station,
+        )
+        self.agents.append(agent)
+        self._log("agent_spawned", agent=agent.agent_id, role=role, station=station)
+        return asdict(agent)
 
     def resupply(self, multiplier: int = 1, reason: str = "manual_supply_drop") -> dict:
         """Add multiplier x SINGLE_HIVE_BOM units into active stock."""
@@ -598,6 +713,22 @@ class NeuroHiveSimulation:
             assert self.current_target is not None
             self.current_target.status = "commissioned"
             self.current_target.commissioned_tick = self.tick_count
+            self.current_target.build_duration_ticks = (
+                self.tick_count - self.current_target.started_tick
+            )
+            self.current_target.quality_score = round(
+                max(
+                    85.0,
+                    min(
+                        100.0,
+                        100.0
+                        - 0.4 * self._target_retries
+                        - 1.5 * self._target_hard_faults
+                        + min(3.0, self.current_target.generation * 0.2),
+                    ),
+                ),
+                1,
+            )
             self.current_target.capabilities = self._full_capabilities()
             self.completed_replications += 1
             self._log(
@@ -605,6 +736,8 @@ class NeuroHiveSimulation:
                 hive=self.current_target.hive_id,
                 parent=self.current_target.parent_id,
                 generation=self.current_target.generation,
+                firmware=self.current_target.firmware_version,
+                quality=self.current_target.quality_score,
             )
             self._start_next_replication()
 
@@ -654,9 +787,97 @@ class NeuroHiveSimulation:
                     offline.status = "working" if offline.current_task else "idle"
                     self._log("agent_self_recovered", agent=offline.agent_id)
 
+    def _handle_logistics(self) -> None:
+        log_agents = [
+            a for a in self.agents if a.role == "logistics" and a.status != "offline"
+        ]
+        if not log_agents:
+            return
+
+        active_targets = sorted(
+            {
+                a.station
+                for a in self.agents
+                if a.role not in ("logistics", "maintenance")
+                and a.status in ("working", "moving")
+            }
+        )
+        low_stock = any(
+            self.stock.get(m, 0) < qty for m, qty in SINGLE_HIVE_BOM.items()
+        )
+        for idx, agent in enumerate(log_agents):
+            if low_stock and (
+                self.continuous_mode or self.resource_strategy == "auto_resupply"
+            ):
+                self._move_agent_toward(agent, "DEPOT", consume_tick=False)
+                self.resupply(1, reason="logistics_convoy")
+                agent.status = "delivering"
+                agent.current_task = "convoy_resupply"
+                agent.tasks_completed += 1
+                agent.busy_ticks += 1
+                low_stock = False
+            elif active_targets:
+                dest = active_targets[(self._logistics_cursor + idx) % len(active_targets)]
+                self._move_agent_toward(agent, dest, consume_tick=False)
+                agent.status = "delivering"
+                agent.current_task = f"shuttle:{dest}"
+                agent.busy_ticks += 1
+                agent.energy = max(15.0, agent.energy - 0.6)
+                agent.energy_used += 0.6
+                self.total_energy_used += 0.6
+            else:
+                agent.status = "idle"
+                agent.current_task = None
+                agent.energy = min(100.0, agent.energy + 5.0)
+                self._move_agent_toward(agent, "DEPOT", consume_tick=False)
+        self._logistics_cursor += 1
+
+    def _update_environment_telemetry(self) -> None:
+        heat_per_worker = 1.8 if self.overclock_active else 0.85
+        for sid in STATIONS:
+            workers = sum(
+                1
+                for a in self.agents
+                if a.station == sid and a.status in ("working", "repairing")
+            )
+            cur = self.station_temps.get(sid, 22.0)
+            nxt = max(22.0, min(95.0, cur + workers * heat_per_worker - 0.45))
+            self.station_temps[sid] = round(nxt, 1)
+            if nxt >= 68.0 and sid not in self._thermal_warned:
+                self._thermal_warned.add(sid)
+                self._log("thermal_warning", station=sid, temp_c=round(nxt, 1))
+            elif nxt < 50.0 and sid in self._thermal_warned:
+                self._thermal_warned.discard(sid)
+
+        solar_kw = round(22.0 + 10.0 * math.sin(self.tick_count * 0.15), 2)
+        active_work = sum(
+            1
+            for a in self.agents
+            if a.status in ("working", "moving", "repairing", "delivering")
+        )
+        load_kw = round(
+            6.5 + active_work * (11.5 if self.overclock_active else 5.2), 2
+        )
+        reactor_kw = round(max(12.0, load_kw - solar_kw + 6.0), 2)
+        net_kwh = (solar_kw + reactor_kw - load_kw) * 0.05
+        storage = max(
+            20.0,
+            min(500.0, float(self.power_grid["grid_storage_kwh"]) + net_kwh),
+        )
+        self.power_grid = {
+            "solar_kw": solar_kw,
+            "reactor_kw": reactor_kw,
+            "load_kw": load_kw,
+            "grid_storage_kwh": round(storage, 2),
+            "max_storage_kwh": 500.0,
+            "overclock_active": self.overclock_active,
+        }
+
     def step(self) -> None:
         if self.phase == "complete" or self.failed:
             return
+        if self.continuous_mode and self.tick_count >= self.max_ticks - 50:
+            self.max_ticks = max(self.max_ticks, self.tick_count + 1000)
         if self.tick_count >= self.max_ticks:
             self.failed = True
             self.failure_reason = f"Maximum tick budget ({self.max_ticks}) exceeded"
@@ -673,7 +894,7 @@ class NeuroHiveSimulation:
         # A task remains assigned to its agent until complete. New tasks are
         # dispatched in stable order, making runs reproducible for a given seed.
         for agent in self.agents:
-            if agent.role == "maintenance":
+            if agent.role in ("maintenance", "logistics"):
                 continue
             if agent.status == "offline":
                 continue
@@ -697,6 +918,7 @@ class NeuroHiveSimulation:
                 )
                 if candidate is not None:
                     if not self._begin_task(candidate, agent):
+                        self._update_environment_telemetry()
                         self._record_history()
                         return
                     running = candidate
@@ -717,9 +939,12 @@ class NeuroHiveSimulation:
                 agent.status = "working"
                 agent.current_task = running.name
                 agent.busy_ticks += 1
-                agent.energy = max(5.0, agent.energy - running.energy_cost_per_tick)
-                agent.energy_used += running.energy_cost_per_tick
-                self.total_energy_used += running.energy_cost_per_tick
+                tick_energy = running.energy_cost_per_tick * (
+                    2.2 if self.overclock_active else 1.0
+                )
+                agent.energy = max(5.0, agent.energy - tick_energy)
+                agent.energy_used += tick_energy
+                self.total_energy_used += tick_energy
 
                 if (
                     self.permanent_fault_rate > 0.0
@@ -730,6 +955,7 @@ class NeuroHiveSimulation:
                     agent.repair_remaining = 3
                     agent.fault_flash = True
                     self.total_hard_faults += 1
+                    self._target_hard_faults += 1
                     self._log(
                         "permanent_fault",
                         task=running.name,
@@ -743,9 +969,11 @@ class NeuroHiveSimulation:
                     agent.retries += 1
                     agent.fault_flash = True
                     self.total_faults += 1
+                    self._target_retries += 1
                     self._log("recoverable_fault", task=running.name, agent=agent.agent_id)
                 else:
-                    running.remaining -= 1
+                    work_units = 2 if self.overclock_active else 1
+                    running.remaining = max(0, running.remaining - work_units)
                 if running.remaining <= 0:
                     running.status = "complete"
                     agent.tasks_completed += 1
@@ -765,6 +993,8 @@ class NeuroHiveSimulation:
         if self.tasks and all(t.status == "complete" for t in self.tasks):
             self._advance_phase()
 
+        self._handle_logistics()
+        self._update_environment_telemetry()
         self._record_history()
 
     def run(self) -> dict:
@@ -793,6 +1023,13 @@ class NeuroHiveSimulation:
             if self.failed
             else ("success" if self.phase == "complete" else "running")
         )
+        swarm_iq = round(100.0 + self.completed_replications * 4.5, 1)
+        throughput = (
+            round((self.completed_replications / self.tick_count) * 100.0, 2)
+            if self.tick_count > 0
+            else 0.0
+        )
+        latest_fw = self.hives[-1].firmware_version if self.hives else "v1.0.0"
         return {
             "project": "NeuroHive 1.0",
             "version": VERSION,
@@ -804,6 +1041,8 @@ class NeuroHiveSimulation:
             "permanent_fault_rate": self.permanent_fault_rate,
             "resource_strategy": self.resource_strategy,
             "enable_travel_ticks": self.enable_travel_ticks,
+            "continuous_mode": self.continuous_mode,
+            "overclock_active": self.overclock_active,
             "phase": self.phase,
             "status": status,
             "requested_replications": self.max_generations,
@@ -813,6 +1052,11 @@ class NeuroHiveSimulation:
             "total_recoverable_faults": self.total_faults,
             "total_hard_faults": self.total_hard_faults,
             "total_energy_used": round(self.total_energy_used, 2),
+            "swarm_intelligence_index": swarm_iq,
+            "throughput_per_100t": throughput,
+            "latest_firmware": latest_fw,
+            "station_temps": dict(self.station_temps),
+            "power_grid": dict(self.power_grid),
             "failure_reason": self.failure_reason,
             "current_target": self.current_target.hive_id
             if self.current_target
@@ -822,7 +1066,8 @@ class NeuroHiveSimulation:
                 "height": GRID_HEIGHT,
                 "stations": STATIONS,
             },
-            "hives": [asdict(h) for h in self.hives],
+            "total_hives": len(self.hives),
+            "hives": [asdict(h) for h in self.hives[-40:]],
             "agents": [asdict(a) for a in self.agents],
             "tasks": [asdict(t) for t in self.tasks],
             "materials": materials,
@@ -849,13 +1094,19 @@ class NeuroHiveSimulation:
             }
             for a in self.agents
         }
+        swarm_iq = round(100.0 + self.completed_replications * 4.5, 1)
+        throughput = (
+            round((self.completed_replications / self.tick_count) * 100.0, 2)
+            if self.tick_count > 0
+            else 0.0
+        )
         return {
             "project": "NeuroHive 1.0",
             "version": VERSION,
             "experimental_intensity": EXPERIMENTAL_INTENSITY,
             "seed": self.seed,
             "status": "success"
-            if self.phase == "complete" and not self.failed
+            if (self.phase == "complete" or self.continuous_mode) and not self.failed
             else "failed",
             "ticks": self.tick_count,
             "requested_replications": self.max_generations,
@@ -869,6 +1120,12 @@ class NeuroHiveSimulation:
             "total_hard_faults": self.total_hard_faults,
             "total_energy_used": round(self.total_energy_used, 2),
             "resource_strategy": self.resource_strategy,
+            "continuous_mode": self.continuous_mode,
+            "overclock_active": self.overclock_active,
+            "swarm_intelligence_index": swarm_iq,
+            "throughput_per_100t": throughput,
+            "station_temps": dict(self.station_temps),
+            "power_grid": dict(self.power_grid),
             "agents": agent_metrics,
             "failure_reason": self.failure_reason,
             "events": self.events,
@@ -1067,6 +1324,16 @@ def main() -> int:
         default=8765,
         help="Port for the live web dashboard server (default: 8765).",
     )
+    parser.add_argument(
+        "--continuous",
+        action="store_true",
+        help="Enable live continuous replication mode (non-stop generational progression).",
+    )
+    parser.add_argument(
+        "--overclock",
+        action="store_true",
+        help="Enable swarm overclocking (2x work throughput at higher heat and energy).",
+    )
     args = parser.parse_args()
 
     if args.gui:
@@ -1080,6 +1347,8 @@ def main() -> int:
             resource_strategy=args.resource_strategy,
             enable_travel_ticks=args.travel_ticks,
             max_ticks=args.max_ticks,
+            continuous_mode=args.continuous,
+            overclock_active=args.overclock,
         )
         return 0
 
@@ -1095,6 +1364,8 @@ def main() -> int:
             resource_strategy=args.resource_strategy,
             enable_travel_ticks=args.travel_ticks,
             max_ticks=args.max_ticks,
+            continuous_mode=args.continuous,
+            overclock_active=args.overclock,
         )
         return 0
 
@@ -1118,8 +1389,17 @@ def main() -> int:
         permanent_fault_rate=args.permanent_fault_rate,
         resource_strategy=args.resource_strategy,
         enable_travel_ticks=args.travel_ticks,
+        continuous_mode=args.continuous,
+        overclock_active=args.overclock,
     )
-    report = sim.run()
+    if args.continuous:
+        for _ in range(args.max_ticks):
+            if sim.failed:
+                break
+            sim.step()
+        report = sim.report()
+    else:
+        report = sim.run()
     print(render_summary(report))
     args.output.write_text(json.dumps(report, indent=2), encoding="utf-8")
     print(f"\nJSON report written to: {args.output.resolve()}")

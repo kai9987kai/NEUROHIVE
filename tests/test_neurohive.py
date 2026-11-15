@@ -206,9 +206,60 @@ class NeuroHiveTests(unittest.TestCase):
 
             sweep = post_json("/api/sweep", {"generations": 1})
             self.assertEqual(len(sweep["summary"]), 5)
+
+            cont_res = post_json("/api/continuous", {"enabled": True})
+            self.assertTrue(cont_res["state"]["continuous_mode"])
+
+            oc_res = post_json("/api/overclock", {"enabled": True})
+            self.assertTrue(oc_res["state"]["overclock_active"])
+
+            spawn_res = post_json("/api/spawn-agent", {"role": "logistics"})
+            self.assertEqual(spawn_res["agent"]["agent_id"], "LOG-01")
+
+            cool_res = post_json("/api/coolant", {})
+            self.assertEqual(cool_res["station_temps"]["FAB_BAY"], 22.0)
         finally:
             server.shutdown()
             server.server_close()
+
+    def test_continuous_mode_runs_past_max_generations_and_resumes_completed(self):
+        sim = NeuroHiveSimulation(
+            seed=42, max_generations=1, fault_rate=0.0, max_ticks=60, continuous_mode=True
+        )
+        for _ in range(160):
+            sim.step()
+        self.assertFalse(sim.failed)
+        self.assertNotEqual(sim.phase, "complete")
+        self.assertGreaterEqual(sim.completed_replications, 5)
+        self.assertGreater(sim.max_ticks, 60)
+
+        # Finite simulation completed at gen 1 can resume seamlessly when continuous mode enabled
+        finite = NeuroHiveSimulation(seed=42, max_generations=1, fault_rate=0.0)
+        finite.run()
+        self.assertEqual(finite.phase, "complete")
+        resumed = finite.set_continuous_mode(True)
+        self.assertTrue(resumed["continuous_mode"])
+        self.assertEqual(finite.phase, "manufacturing")
+        for _ in range(25):
+            finite.step()
+        self.assertEqual(finite.completed_replications, 2)
+
+    def test_overclock_thermal_coolant_power_and_dynamic_spawn(self):
+        sim = NeuroHiveSimulation(seed=42, max_generations=2, fault_rate=0.0)
+        log_agent = sim.spawn_agent("logistics")
+        self.assertEqual(log_agent["agent_id"], "LOG-01")
+
+        sim.set_overclock(True)
+        for _ in range(15):
+            sim.step()
+        snap = sim.snapshot()
+        self.assertTrue(snap["overclock_active"])
+        self.assertGreater(snap["station_temps"]["FAB_BAY"], 22.0)
+        self.assertIn("load_kw", snap["power_grid"])
+        self.assertGreater(snap["swarm_intelligence_index"], 100.0)
+
+        temps = sim.coolant_flush()
+        self.assertEqual(temps["FAB_BAY"], 22.0)
 
     def test_gui_initializes_cleanly(self):
         try:

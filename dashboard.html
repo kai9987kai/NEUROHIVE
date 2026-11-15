@@ -568,6 +568,7 @@
           <h1>NEUROHIVE 1.0 // LIVE DIGITAL TWIN &amp; SWARM TELEMETRY</h1>
         </div>
         <div class="status-group">
+          <span id="continuousBadge" class="badge">MODE: FINITE</span>
           <span id="phaseBadge" class="badge">PHASE: MANUFACTURING</span>
           <span id="targetBadge" class="badge">TARGET: NH-B</span>
           <span id="statusBadge" class="badge badge--running">RUNNING</span>
@@ -576,7 +577,7 @@
 
       <div class="param-group">
         <label class="field">Seed <input id="cfgSeed" type="number" value="42" min="1" /></label>
-        <label class="field">Gens <input id="cfgGens" type="number" value="2" min="1" max="15" /></label>
+        <label class="field">Gens <input id="cfgGens" type="number" value="2" min="1" max="50" /></label>
         <label class="field">Fault Rate <input id="cfgFault" type="number" value="0.01" min="0" max="0.8" step="0.01" /></label>
         <label class="field">Hard Fault <input id="cfgHardFault" type="number" value="0.00" min="0" max="0.5" step="0.01" /></label>
         <label class="field">Strategy
@@ -586,8 +587,10 @@
             <option value="auto_resupply">auto_resupply</option>
           </select>
         </label>
+        <label class="field"><input id="cfgContinuous" type="checkbox" /> &infin; Continuous Mode</label>
         <label class="field"><input id="cfgTravel" type="checkbox" /> Travel Physics</label>
-        <label class="field"><input id="cfgMaint" type="checkbox" /> MNT-01 Repair Bot</label>
+        <label class="field"><input id="cfgMaint" type="checkbox" /> MNT-01 Repair</label>
+        <label class="field"><input id="cfgLogistics" type="checkbox" /> LOG-01 Convoy</label>
       </div>
 
       <div class="controls-bar">
@@ -595,9 +598,20 @@
         <button id="btnStep" type="button">Step +1</button>
         <button id="btnStep5" type="button">Step +5</button>
         <button id="btnReset" type="button">Apply &amp; Reset</button>
+        <button id="btnOverclock" type="button">Overclock: OFF</button>
+        <button id="btnCoolant" type="button">Coolant Flush</button>
         <button id="btnFault" class="warn" type="button">Inject Fault</button>
         <button id="btnHardFault" class="danger" type="button">Hard Fault</button>
         <button id="btnResupply" type="button">Supply Drop (+1 BOM)</button>
+        <select id="spawnRole" aria-label="Select agent role to spawn">
+          <option value="fabricator">fabricator</option>
+          <option value="systems">systems</option>
+          <option value="assembler">assembler</option>
+          <option value="inspector">inspector</option>
+          <option value="maintenance">maintenance</option>
+          <option value="logistics">logistics</option>
+        </select>
+        <button id="btnSpawn" type="button">+ Spawn Bot</button>
         <button id="btnSweep" type="button">Sweep Benchmark</button>
         <button id="btnExport" type="button">Download JSON</button>
 
@@ -614,7 +628,7 @@
         <span id="kpiTick" class="kpi-val">0 / 2000</span>
       </article>
       <article class="kpi-card">
-        <span class="kpi-label">Progress</span>
+        <span class="kpi-label">Build Progress</span>
         <span id="kpiProgress" class="kpi-val">0.0%</span>
       </article>
       <article class="kpi-card">
@@ -622,11 +636,27 @@
         <span id="kpiReplicas" class="kpi-val">0 / 2</span>
       </article>
       <article class="kpi-card">
+        <span class="kpi-label">Swarm IQ / FW</span>
+        <span id="kpiSwarmIq" class="kpi-val">100.0 / v1.0</span>
+      </article>
+      <article class="kpi-card">
+        <span class="kpi-label">Throughput</span>
+        <span id="kpiThroughput" class="kpi-val">0.00 / 100t</span>
+      </article>
+      <article class="kpi-card">
         <span class="kpi-label">Faults (Rec / Hard)</span>
         <span id="kpiFaults" class="kpi-val">0 / 0</span>
       </article>
       <article class="kpi-card">
-        <span class="kpi-label">Swarm Energy Used</span>
+        <span class="kpi-label">Microgrid Load</span>
+        <span id="kpiGridLoad" class="kpi-val">8.0 kW</span>
+      </article>
+      <article class="kpi-card">
+        <span class="kpi-label">Peak Temp</span>
+        <span id="kpiPeakTemp" class="kpi-val">22.0°C</span>
+      </article>
+      <article class="kpi-card">
+        <span class="kpi-label">Swarm Energy</span>
         <span id="kpiEnergy" class="kpi-val">0.0</span>
       </article>
     </section>
@@ -700,7 +730,7 @@
     <section class="panel charts-panel panel-isolated">
       <div class="panel-title-row">
         <h2 class="panel-title">Live Telemetry History</h2>
-        <span class="badge">Cyan: Util % | Emerald: Stock % | Amber: Avg Energy %</span>
+        <span class="badge">Cyan: Util % | Emerald: Stock % | Amber: Energy % | Violet: Thermal %</span>
       </div>
       <canvas id="telemetryChart" width="640" height="215"></canvas>
     </section>
@@ -738,13 +768,15 @@
       systems: "#a78bfa",
       assembler: "#34d399",
       inspector: "#fb7185",
-      maintenance: "#f59e0b"
+      maintenance: "#f59e0b",
+      logistics: "#38bdf8"
     };
 
     const STATUS_RING = {
       working: "#00e5ff",
       moving: "#a78bfa",
       repairing: "#f59e0b",
+      delivering: "#38bdf8",
       offline: "#ef4444",
       idle: "#10b981"
     };
@@ -841,21 +873,41 @@
 
     function renderDOM() {
       if (!state) return;
+      const contBadge = el("continuousBadge");
+      contBadge.textContent = state.continuous_mode ? "MODE: ∞ CONTINUOUS" : "MODE: FINITE";
+      contBadge.className = `badge ${state.continuous_mode ? "badge--running" : ""}`;
+      el("cfgContinuous").checked = Boolean(state.continuous_mode);
+
+      const ocBtn = el("btnOverclock");
+      ocBtn.textContent = state.overclock_active ? "Overclock: ON (2x)" : "Overclock: OFF";
+      ocBtn.className = state.overclock_active ? "warn" : "";
+
       el("phaseBadge").textContent = `PHASE: ${state.phase.toUpperCase()}`;
       el("targetBadge").textContent = `TARGET: ${state.current_target || "COMPLETE"}`;
       const stBadge = el("statusBadge");
       stBadge.textContent = state.status.toUpperCase();
       stBadge.className = `badge badge--${state.status}`;
 
-      el("kpiTick").textContent = `${state.tick} / ${state.max_ticks}`;
+      el("kpiTick").textContent = state.continuous_mode ? `${state.tick} (∞)` : `${state.tick} / ${state.max_ticks}`;
       el("kpiProgress").textContent = `${state.progress_pct.toFixed(1)}%`;
-      el("kpiReplicas").textContent = `${state.completed_replications} / ${state.requested_replications}`;
+      el("kpiReplicas").textContent = state.continuous_mode
+        ? `${state.completed_replications} (∞)`
+        : `${state.completed_replications} / ${state.requested_replications}`;
+      el("kpiSwarmIq").textContent = `${(state.swarm_intelligence_index ?? 100).toFixed(1)} / ${state.latest_firmware ?? "v1.0.0"}`;
+      el("kpiThroughput").textContent = `${(state.throughput_per_100t ?? 0).toFixed(2)} / 100t`;
       el("kpiFaults").textContent = `${state.total_recoverable_faults} / ${state.total_hard_faults}`;
+      const grid = state.power_grid || { load_kw: 8.0 };
+      el("kpiGridLoad").textContent = `${Number(grid.load_kw).toFixed(1)} kW`;
+      const temps = Object.values(state.station_temps || { DEPOT: 22.0 });
+      const peakTemp = Math.max(...temps);
+      const peakEl = el("kpiPeakTemp");
+      peakEl.textContent = `${peakTemp.toFixed(1)}°C`;
+      peakEl.style.color = peakTemp >= 68 ? "var(--crimson)" : (peakTemp >= 48 ? "var(--amber)" : "var(--cyan)");
       el("kpiEnergy").textContent = state.total_energy_used.toFixed(1);
       el("strategyBadge").textContent = state.resource_strategy;
 
       const activeTasks = state.tasks.filter((t) => t.status === "running").length;
-      el("activeTasksSummary").textContent = `Active Tasks: ${activeTasks} / ${state.tasks.length}`;
+      el("activeTasksSummary").textContent = `Active Tasks: ${activeTasks} / ${state.tasks.length} | Bots: ${state.agents.length}`;
 
       renderMaterials();
       renderAgentTable();
@@ -908,23 +960,28 @@
 
     function renderLineage() {
       const svg = el("lineageSvg");
-      const hives = state.hives;
-      const stepX = Math.min(145, Math.max(92, 820 / Math.max(1, hives.length)));
+      const allHives = state.hives;
+      const hives = allHives.length > 8 ? allHives.slice(-8) : allHives;
+      const offsetX = allHives.length > 8 ? 36 : 0;
+      const stepX = Math.min(135, Math.max(88, (840 - offsetX) / Math.max(1, hives.length)));
       let out = "";
+      if (allHives.length > 8) {
+        out += `<text x="16" y="49" fill="#94a3b8" font-family="Consolas,monospace" font-size="11">...</text>`;
+      }
       hives.forEach((h, i) => {
-        const cx = 56 + i * stepX;
+        const cx = offsetX + 52 + i * stepX;
         const cy = 46;
         if (i > 0) {
-          const prevX = 56 + (i - 1) * stepX;
-          out += `<line x1="${prevX + 36}" y1="${cy}" x2="${cx - 38}" y2="${cy}" stroke="#00e5ff" stroke-width="2" stroke-dasharray="4 3" />`;
-          out += `<polygon points="${cx - 38},${cy - 4} ${cx - 30},${cy} ${cx - 38},${cy + 4}" fill="#00e5ff" />`;
+          const prevX = offsetX + 52 + (i - 1) * stepX;
+          out += `<line x1="${prevX + 34}" y1="${cy}" x2="${cx - 36}" y2="${cy}" stroke="#00e5ff" stroke-width="2" stroke-dasharray="4 3" />`;
+          out += `<polygon points="${cx - 36},${cy - 4} ${cx - 28},${cy} ${cx - 36},${cy + 4}" fill="#00e5ff" />`;
         }
         const stroke = h.status === "commissioned" ? "#10b981" : (state.status === "failed" ? "#ef4444" : "#00e5ff");
         const activeRing = h.hive_id === selectedHiveId ? `stroke-width="3"` : `stroke-width="1.6"`;
         const sub = h.commissioned_tick !== null ? `t=${h.commissioned_tick}` : h.status;
         out += `
           <g class="hive-node" data-hive="${h.hive_id}" style="cursor:pointer;">
-            <rect x="${cx - 34}" y="${cy - 22}" width="68" height="44" rx="7" fill="#121d36" stroke="${stroke}" ${activeRing} />
+            <rect x="${cx - 33}" y="${cy - 22}" width="66" height="44" rx="7" fill="#121d36" stroke="${stroke}" ${activeRing} />
             <text x="${cx}" y="${cy - 3}" text-anchor="middle" fill="#e2e8f0" font-family="Consolas,monospace" font-size="12" font-weight="700">${h.hive_id}</text>
             <text x="${cx}" y="${cy + 13}" text-anchor="middle" fill="${stroke}" font-family="Consolas,monospace" font-size="10">${sub}</text>
           </g>
@@ -942,7 +999,8 @@
 
     function renderBlueprint() {
       const hive = state.hives.find((h) => h.hive_id === selectedHiveId) || state.hives[state.hives.length - 1];
-      el("bpTargetLabel").textContent = `Inspecting: ${hive.hive_id} (Gen ${hive.generation})`;
+      const totalHives = state.total_hives ?? state.hives.length;
+      el("bpTargetLabel").textContent = `Inspecting: ${hive.hive_id} (Gen ${hive.generation}, ${hive.firmware_version ?? "v1.0.0"}) | Lineage: ${totalHives}`;
       const running = new Set(state.tasks.filter((t) => t.status === "running").map((t) => t.name));
       const entries = [
         ...Object.entries(hive.components_built),
@@ -1005,22 +1063,23 @@
 
       const hist = state.history;
       if (!hist || hist.length < 2) return;
-      const drawSeries = (key, color) => {
+      const drawSeries = (getter, color) => {
         c.beginPath();
         c.strokeStyle = color;
         c.lineWidth = 2;
         hist.forEach((pt, idx) => {
           const x = 14 + (idx / Math.max(1, hist.length - 1)) * (w - 28);
-          const val = Math.max(0, Math.min(100, pt[key] ?? 0));
+          const val = Math.max(0, Math.min(100, getter(pt)));
           const y = h - 16 - (val / 100) * (h - 32);
           if (idx === 0) c.moveTo(x, y);
           else c.lineTo(x, y);
         });
         c.stroke();
       };
-      drawSeries("busy_pct", "#00e5ff");
-      drawSeries("stock_pct", "#10b981");
-      drawSeries("avg_energy", "#f59e0b");
+      drawSeries((pt) => pt.busy_pct ?? 0, "#00e5ff");
+      drawSeries((pt) => pt.stock_pct ?? 0, "#10b981");
+      drawSeries((pt) => pt.avg_energy ?? 0, "#f59e0b");
+      drawSeries((pt) => (((pt.peak_temp_c ?? 22) - 20) / 75) * 100, "#a78bfa");
     }
 
     function drawFactoryFrame() {
@@ -1075,19 +1134,24 @@
       ctx.restore();
 
       const activeStations = new Set(
-        state.agents.filter((a) => a.status === "working" || a.status === "repairing").map((a) => a.station)
+        state.agents.filter((a) => ["working", "repairing", "delivering"].includes(a.status)).map((a) => a.station)
       );
 
       // Stations
       for (const [sid, info] of Object.entries(state.grid.stations)) {
         const [px, py] = toPx(info.x, info.y);
         const active = activeStations.has(sid);
+        const temp = (state.station_temps && state.station_temps[sid]) ?? 22.0;
+        const hot = temp >= 68.0;
+        const warm = temp >= 45.0;
         const pulse = active ? Math.sin(animPhase * 2.4) * 4 : 0;
-        const bw = 112 + pulse;
-        const bh = 68 + pulse * 0.6;
-        ctx.fillStyle = active ? "rgba(18, 30, 58, 0.96)" : "rgba(13, 21, 41, 0.85)";
-        ctx.strokeStyle = active ? info.color : "#2b3e66";
-        ctx.lineWidth = active ? 2.2 : 1.2;
+        const bw = 116 + pulse;
+        const bh = 72 + pulse * 0.6;
+        ctx.fillStyle = hot
+          ? "rgba(62, 16, 26, 0.92)"
+          : (active ? "rgba(18, 30, 58, 0.96)" : "rgba(13, 21, 41, 0.85)");
+        ctx.strokeStyle = hot ? "#ef4444" : (warm ? "#f59e0b" : (active ? info.color : "#2b3e66"));
+        ctx.lineWidth = active || hot ? 2.2 : 1.2;
         ctx.beginPath();
         ctx.roundRect(px - bw / 2, py - bh / 2, bw, bh, 10);
         ctx.fill();
@@ -1097,6 +1161,10 @@
         ctx.font = "700 11px Consolas, monospace";
         ctx.textAlign = "center";
         ctx.fillText(sid, px, py - bh / 2 + 16);
+
+        ctx.fillStyle = hot ? "#fca5a5" : (warm ? "#fcd34d" : "#64748b");
+        ctx.font = "10px Consolas, monospace";
+        ctx.fillText(`${temp.toFixed(1)}°C`, px, py + bh / 2 - 9);
 
         ctx.fillStyle = "#94a3b8";
         ctx.font = "11px Segoe UI, sans-serif";
@@ -1123,13 +1191,21 @@
           const st = state.grid.stations[a.station];
           const [sx, sy] = toPx(st.x, st.y);
 
-          if (a.status === "working" || a.status === "repairing") {
+          if (["working", "repairing", "delivering"].includes(a.status)) {
             ctx.save();
             ctx.strokeStyle = ROLE_COLORS[a.role] || "#00e5ff";
             ctx.lineWidth = 2;
             ctx.setLineDash([4, 4]);
             ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(sx, sy); ctx.stroke();
             ctx.restore();
+          }
+
+          if (state.overclock_active && a.status === "working") {
+            ctx.beginPath();
+            ctx.arc(px, py, 24 + Math.sin(animPhase * 5) * 2.5, 0, Math.PI * 2);
+            ctx.strokeStyle = "rgba(245, 158, 11, 0.65)";
+            ctx.lineWidth = 1.6;
+            ctx.stroke();
           }
 
           const ring = a.fault_flash ? "#ef4444" : (STATUS_RING[a.status] || "#94a3b8");
@@ -1211,6 +1287,8 @@
       tooltip.style.opacity = "0";
     });
 
+    let steppingInFlight = false;
+
     function gatherParams() {
       return {
         seed: Number(el("cfgSeed").value),
@@ -1219,7 +1297,10 @@
         permanent_fault_rate: Number(el("cfgHardFault").value),
         resource_strategy: el("cfgStrategy").value,
         enable_travel_ticks: el("cfgTravel").checked,
-        maintenance_bot: el("cfgMaint").checked
+        maintenance_bot: el("cfgMaint").checked,
+        logistics_bot: el("cfgLogistics").checked,
+        continuous_mode: el("cfgContinuous").checked,
+        overclock_active: Boolean(state && state.overclock_active)
       };
     }
 
@@ -1237,8 +1318,14 @@
             setPlaying(false);
             return;
           }
-          const next = await api("/api/step", "POST", { count: 1 });
-          syncVisualState(next);
+          if (steppingInFlight) return;
+          steppingInFlight = true;
+          try {
+            const next = await api("/api/step", "POST", { count: 1 });
+            syncVisualState(next);
+          } finally {
+            steppingInFlight = false;
+          }
         }, interval);
       }
     }
@@ -1249,6 +1336,32 @@
         syncVisualState(next, true);
       }
       setPlaying(!playing);
+    });
+
+    el("cfgContinuous").addEventListener("change", async () => {
+      const enabled = el("cfgContinuous").checked;
+      const res = await api("/api/continuous", "POST", { enabled });
+      syncVisualState(res.state);
+      if (enabled && !playing) {
+        setPlaying(true);
+      }
+    });
+
+    el("btnOverclock").addEventListener("click", async () => {
+      const nextOc = !(state && state.overclock_active);
+      const res = await api("/api/overclock", "POST", { enabled: nextOc });
+      syncVisualState(res.state);
+    });
+
+    el("btnCoolant").addEventListener("click", async () => {
+      const res = await api("/api/coolant", "POST", {});
+      syncVisualState(res.state);
+    });
+
+    el("btnSpawn").addEventListener("click", async () => {
+      const role = el("spawnRole").value;
+      const res = await api("/api/spawn-agent", "POST", { role });
+      syncVisualState(res.state);
     });
 
     el("btnStep").addEventListener("click", async () => {
