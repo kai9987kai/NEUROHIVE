@@ -1,0 +1,491 @@
+{
+  "project": "NeuroHive 1.0",
+  "version": "1.0.0",
+  "experimental_intensity": 0.35,
+  "seed": 42,
+  "status": "success",
+  "ticks": 41,
+  "requested_replications": 2,
+  "completed_replications": 2,
+  "commissioned_hives": [
+    {
+      "hive_id": "NH-A",
+      "generation": 0,
+      "parent_id": "origin",
+      "status": "commissioned",
+      "commissioned_tick": null,
+      "capabilities": {
+        "planning": true,
+        "fabrication": true,
+        "assembly": true,
+        "sensing": true,
+        "communications": true,
+        "safety": true,
+        "replication": true
+      }
+    },
+    {
+      "hive_id": "NH-B",
+      "generation": 1,
+      "parent_id": "NH-A",
+      "status": "commissioned",
+      "commissioned_tick": 21,
+      "capabilities": {
+        "planning": true,
+        "fabrication": true,
+        "assembly": true,
+        "sensing": true,
+        "communications": true,
+        "safety": true,
+        "replication": true
+      }
+    },
+    {
+      "hive_id": "NH-C",
+      "generation": 2,
+      "parent_id": "NH-B",
+      "status": "commissioned",
+      "commissioned_tick": 41,
+      "capabilities": {
+        "planning": true,
+        "fabrication": true,
+        "assembly": true,
+        "sensing": true,
+        "communications": true,
+        "safety": true,
+        "replication": true
+      }
+    }
+  ],
+  "replica_count": 2,
+  "material_used": {
+    "aluminium": 68,
+    "polymer": 14,
+    "copper": 22,
+    "electronics": 18,
+    "motors": 8,
+    "battery": 2
+  },
+  "material_remaining": {
+    "aluminium": 12,
+    "polymer": 6,
+    "copper": 18,
+    "electronics": 10,
+    "motors": 2,
+    "battery": 1
+  },
+  "total_recoverable_faults": 1,
+  "agents": {
+    "FAB-01": {
+      "role": "fabricator",
+      "tasks_completed": 6,
+      "busy_ticks": 18
+    },
+    "FAB-02": {
+      "role": "fabricator",
+      "tasks_completed": 6,
+      "busy_ticks": 21
+    },
+    "SYS-01": {
+      "role": "systems",
+      "tasks_completed": 8,
+      "busy_ticks": 24
+    },
+    "ASM-01": {
+      "role": "assembler",
+      "tasks_completed": 2,
+      "busy_ticks": 10
+    },
+    "ASM-02": {
+      "role": "assembler",
+      "tasks_completed": 0,
+      "busy_ticks": 0
+    },
+    "QA-01": {
+      "role": "inspector",
+      "tasks_completed": 4,
+      "busy_ticks": 10
+    }
+  },
+  "failure_reason": null,
+  "events": [
+    {
+      "tick": 0,
+      "event": "replication_started",
+      "parent": "NH-A",
+      "child": "NH-B",
+      "generation": 1
+    },
+    {
+      "tick": 0,
+      "event": "digital_twin_created",
+      "hive": "NH-B",
+      "blueprint_components": 9
+    },
+    {
+      "tick": 1,
+      "event": "task_started",
+      "task": "frame_module",
+      "agent": "FAB-01"
+    },
+    {
+      "tick": 1,
+      "event": "task_started",
+      "task": "sensor_pack",
+      "agent": "FAB-02"
+    },
+    {
+      "tick": 1,
+      "event": "task_started",
+      "task": "controller",
+      "agent": "SYS-01"
+    },
+    {
+      "tick": 2,
+      "event": "task_completed",
+      "task": "sensor_pack",
+      "agent": "FAB-02"
+    },
+    {
+      "tick": 3,
+      "event": "task_started",
+      "task": "actuator_pack",
+      "agent": "FAB-02"
+    },
+    {
+      "tick": 3,
+      "event": "task_completed",
+      "task": "controller",
+      "agent": "SYS-01"
+    },
+    {
+      "tick": 4,
+      "event": "task_started",
+      "task": "communications",
+      "agent": "SYS-01"
+    },
+    {
+      "tick": 5,
+      "event": "task_completed",
+      "task": "frame_module",
+      "agent": "FAB-01"
+    },
+    {
+      "tick": 5,
+      "event": "task_completed",
+      "task": "communications",
+      "agent": "SYS-01"
+    },
+    {
+      "tick": 6,
+      "event": "task_started",
+      "task": "power_unit",
+      "agent": "FAB-01"
+    },
+    {
+      "tick": 6,
+      "event": "task_completed",
+      "task": "actuator_pack",
+      "agent": "FAB-02"
+    },
+    {
+      "tick": 6,
+      "event": "task_started",
+      "task": "software_image",
+      "agent": "SYS-01"
+    },
+    {
+      "tick": 7,
+      "event": "task_completed",
+      "task": "power_unit",
+      "agent": "FAB-01"
+    },
+    {
+      "tick": 7,
+      "event": "task_started",
+      "task": "fabrication_unit",
+      "agent": "FAB-02"
+    },
+    {
+      "tick": 7,
+      "event": "recoverable_fault",
+      "task": "fabrication_unit",
+      "agent": "FAB-02"
+    },
+    {
+      "tick": 8,
+      "event": "task_started",
+      "task": "safety_system",
+      "agent": "FAB-01"
+    },
+    {
+      "tick": 8,
+      "event": "task_completed",
+      "task": "software_image",
+      "agent": "SYS-01"
+    },
+    {
+      "tick": 9,
+      "event": "task_completed",
+      "task": "safety_system",
+      "agent": "FAB-01"
+    },
+    {
+      "tick": 11,
+      "event": "task_completed",
+      "task": "fabrication_unit",
+      "agent": "FAB-02"
+    },
+    {
+      "tick": 11,
+      "event": "manufacturing_complete",
+      "hive": "NH-B"
+    },
+    {
+      "tick": 12,
+      "event": "task_started",
+      "task": "electrical_integration",
+      "agent": "SYS-01"
+    },
+    {
+      "tick": 12,
+      "event": "task_started",
+      "task": "mechanical_assembly",
+      "agent": "ASM-01"
+    },
+    {
+      "tick": 15,
+      "event": "task_completed",
+      "task": "electrical_integration",
+      "agent": "SYS-01"
+    },
+    {
+      "tick": 16,
+      "event": "task_completed",
+      "task": "mechanical_assembly",
+      "agent": "ASM-01"
+    },
+    {
+      "tick": 16,
+      "event": "assembly_complete",
+      "hive": "NH-B"
+    },
+    {
+      "tick": 17,
+      "event": "task_started",
+      "task": "self_test",
+      "agent": "QA-01"
+    },
+    {
+      "tick": 19,
+      "event": "task_completed",
+      "task": "self_test",
+      "agent": "QA-01"
+    },
+    {
+      "tick": 20,
+      "event": "task_started",
+      "task": "safety_validation",
+      "agent": "QA-01"
+    },
+    {
+      "tick": 21,
+      "event": "task_completed",
+      "task": "safety_validation",
+      "agent": "QA-01"
+    },
+    {
+      "tick": 21,
+      "event": "hive_commissioned",
+      "hive": "NH-B",
+      "parent": "NH-A",
+      "generation": 1
+    },
+    {
+      "tick": 21,
+      "event": "replication_started",
+      "parent": "NH-B",
+      "child": "NH-C",
+      "generation": 2
+    },
+    {
+      "tick": 21,
+      "event": "digital_twin_created",
+      "hive": "NH-C",
+      "blueprint_components": 9
+    },
+    {
+      "tick": 22,
+      "event": "task_started",
+      "task": "frame_module",
+      "agent": "FAB-01"
+    },
+    {
+      "tick": 22,
+      "event": "task_started",
+      "task": "sensor_pack",
+      "agent": "FAB-02"
+    },
+    {
+      "tick": 22,
+      "event": "task_started",
+      "task": "controller",
+      "agent": "SYS-01"
+    },
+    {
+      "tick": 23,
+      "event": "task_completed",
+      "task": "sensor_pack",
+      "agent": "FAB-02"
+    },
+    {
+      "tick": 24,
+      "event": "task_started",
+      "task": "actuator_pack",
+      "agent": "FAB-02"
+    },
+    {
+      "tick": 24,
+      "event": "task_completed",
+      "task": "controller",
+      "agent": "SYS-01"
+    },
+    {
+      "tick": 25,
+      "event": "task_started",
+      "task": "communications",
+      "agent": "SYS-01"
+    },
+    {
+      "tick": 26,
+      "event": "task_completed",
+      "task": "frame_module",
+      "agent": "FAB-01"
+    },
+    {
+      "tick": 26,
+      "event": "task_completed",
+      "task": "communications",
+      "agent": "SYS-01"
+    },
+    {
+      "tick": 27,
+      "event": "task_started",
+      "task": "power_unit",
+      "agent": "FAB-01"
+    },
+    {
+      "tick": 27,
+      "event": "task_completed",
+      "task": "actuator_pack",
+      "agent": "FAB-02"
+    },
+    {
+      "tick": 27,
+      "event": "task_started",
+      "task": "software_image",
+      "agent": "SYS-01"
+    },
+    {
+      "tick": 28,
+      "event": "task_completed",
+      "task": "power_unit",
+      "agent": "FAB-01"
+    },
+    {
+      "tick": 28,
+      "event": "task_started",
+      "task": "fabrication_unit",
+      "agent": "FAB-02"
+    },
+    {
+      "tick": 29,
+      "event": "task_started",
+      "task": "safety_system",
+      "agent": "FAB-01"
+    },
+    {
+      "tick": 29,
+      "event": "task_completed",
+      "task": "software_image",
+      "agent": "SYS-01"
+    },
+    {
+      "tick": 30,
+      "event": "task_completed",
+      "task": "safety_system",
+      "agent": "FAB-01"
+    },
+    {
+      "tick": 31,
+      "event": "task_completed",
+      "task": "fabrication_unit",
+      "agent": "FAB-02"
+    },
+    {
+      "tick": 31,
+      "event": "manufacturing_complete",
+      "hive": "NH-C"
+    },
+    {
+      "tick": 32,
+      "event": "task_started",
+      "task": "electrical_integration",
+      "agent": "SYS-01"
+    },
+    {
+      "tick": 32,
+      "event": "task_started",
+      "task": "mechanical_assembly",
+      "agent": "ASM-01"
+    },
+    {
+      "tick": 35,
+      "event": "task_completed",
+      "task": "electrical_integration",
+      "agent": "SYS-01"
+    },
+    {
+      "tick": 36,
+      "event": "task_completed",
+      "task": "mechanical_assembly",
+      "agent": "ASM-01"
+    },
+    {
+      "tick": 36,
+      "event": "assembly_complete",
+      "hive": "NH-C"
+    },
+    {
+      "tick": 37,
+      "event": "task_started",
+      "task": "self_test",
+      "agent": "QA-01"
+    },
+    {
+      "tick": 39,
+      "event": "task_completed",
+      "task": "self_test",
+      "agent": "QA-01"
+    },
+    {
+      "tick": 40,
+      "event": "task_started",
+      "task": "safety_validation",
+      "agent": "QA-01"
+    },
+    {
+      "tick": 41,
+      "event": "task_completed",
+      "task": "safety_validation",
+      "agent": "QA-01"
+    },
+    {
+      "tick": 41,
+      "event": "hive_commissioned",
+      "hive": "NH-C",
+      "parent": "NH-B",
+      "generation": 2
+    }
+  ]
+}

@@ -1,0 +1,1356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NeuroHive 1.0 — Live Digital Twin &amp; Swarm Dashboard</title>
+  <style>
+    :root {
+      --bg: #070b14;
+      --panel: #10182b;
+      --panel-alt: #16213a;
+      --border: #253559;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --cyan: #00e5ff;
+      --emerald: #10b981;
+      --amber: #f59e0b;
+      --crimson: #ef4444;
+      --violet: #a78bfa;
+      --font-sans: "Segoe UI", system-ui, -apple-system, sans-serif;
+      --font-mono: "Cascadia Code", "Consolas", ui-monospace, monospace;
+    }
+
+    *, *::before, *::after {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-block-size: 100dvb;
+      background: radial-gradient(circle at 18% 8%, #101b36 0%, var(--bg) 55%);
+      color: var(--text);
+      font-family: var(--font-sans);
+      line-height: 1.45;
+    }
+
+    canvas, svg {
+      display: block;
+    }
+
+    .app-shell {
+      display: grid;
+      grid-template-columns: minmax(0, 1.45fr) minmax(360px, 1fr);
+      grid-template-areas:
+        "header  header"
+        "kpis    kpis"
+        "visuals telemetry"
+        "lineage charts";
+      gap: 0.85rem;
+      padding: 0.9rem;
+      max-inline-size: 1680px;
+      margin-inline: auto;
+    }
+
+    @media (max-width: 1080px) {
+      .app-shell {
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-areas:
+          "header"
+          "kpis"
+          "visuals"
+          "lineage"
+          "telemetry"
+          "charts";
+      }
+    }
+
+    .panel {
+      background: linear-gradient(180deg, rgba(22, 33, 58, 0.88) 0%, rgba(16, 24, 43, 0.95) 100%);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 0.85rem 1rem;
+      min-inline-size: 0;
+      box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35);
+    }
+
+    .panel-isolated {
+      content-visibility: auto;
+      contain-intrinsic-size: auto 420px auto 340px;
+    }
+
+    @supports not (content-visibility: auto) {
+      .panel-isolated {
+        contain: layout style paint;
+      }
+    }
+
+    .app-header {
+      grid-area: header;
+      display: flex;
+      flex-direction: column;
+      gap: 0.65rem;
+    }
+
+    .header-top {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: safe center;
+      gap: 0.75rem;
+    }
+
+    .brand {
+      display: flex;
+      align-items: safe center;
+      gap: 0.65rem;
+    }
+
+    .brand-dot {
+      inline-size: 12px;
+      block-size: 12px;
+      border-radius: 50%;
+      background: var(--cyan);
+      box-shadow: 0 0 12px var(--cyan);
+    }
+
+    .brand h1 {
+      margin: 0;
+      font-size: 1.05rem;
+      letter-spacing: 0.05em;
+      color: var(--cyan);
+      font-weight: 700;
+    }
+
+    .status-group {
+      margin-inline-start: auto;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: safe center;
+      gap: 0.5rem;
+    }
+
+    .badge {
+      font-family: var(--font-mono);
+      font-size: 0.76rem;
+      font-weight: 700;
+      padding: 0.22rem 0.65rem;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: var(--panel-alt);
+      color: var(--text);
+    }
+
+    .badge--running { border-color: var(--cyan); color: var(--cyan); }
+    .badge--success { border-color: var(--emerald); color: var(--emerald); background: rgba(16, 185, 129, 0.14); }
+    .badge--failed  { border-color: var(--crimson); color: var(--crimson); background: rgba(239, 68, 68, 0.14); }
+
+    .controls-bar {
+      display: flex;
+      flex-wrap: wrap;
+      flex-wrap: balance;
+      align-items: safe center;
+      gap: 0.5rem;
+    }
+
+    .param-group {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: safe center;
+      gap: 0.55rem;
+      padding-block: 0.25rem;
+    }
+
+    label.field {
+      display: inline-flex;
+      align-items: safe center;
+      gap: 0.35rem;
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+
+    input[type="number"], select {
+      background: #0a1020;
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0.28rem 0.45rem;
+      font-family: var(--font-mono);
+      font-size: 0.8rem;
+      inline-size: 4.8rem;
+    }
+
+    select {
+      inline-size: auto;
+    }
+
+    button {
+      cursor: pointer;
+      background: var(--panel-alt);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0.38rem 0.75rem;
+      font-size: 0.82rem;
+      font-weight: 600;
+      transition: border-color 140ms ease, background 140ms ease, transform 90ms ease;
+    }
+
+    button:hover {
+      border-color: var(--cyan);
+      color: var(--cyan);
+    }
+
+    button:active {
+      transform: translateY(1px);
+    }
+
+    button.primary {
+      background: linear-gradient(135deg, #0891b2, #0284c7);
+      border-color: #38bdf8;
+      color: #ffffff;
+    }
+
+    button.primary:hover {
+      background: linear-gradient(135deg, #06b6d4, #0ea5e9);
+      color: #ffffff;
+    }
+
+    button.warn {
+      border-color: rgba(245, 158, 11, 0.55);
+      color: var(--amber);
+    }
+
+    button.danger {
+      border-color: rgba(239, 68, 68, 0.55);
+      color: var(--crimson);
+    }
+
+    .speed-control {
+      margin-inline-start: auto;
+      display: inline-flex;
+      align-items: safe center;
+      gap: 0.45rem;
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+
+    .kpi-strip {
+      grid-area: kpis;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      grid-template-rows: auto auto;
+      gap: 0.65rem;
+    }
+
+    .kpi-card {
+      grid-row: span 2;
+      display: grid;
+      grid-template-rows: auto 1fr;
+      grid-template-rows: subgrid;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.6rem 0.8rem;
+      gap: 0.2rem;
+    }
+
+    .kpi-label {
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+      font-weight: 700;
+    }
+
+    .kpi-val {
+      font-family: var(--font-mono);
+      font-size: 1.25rem;
+      font-weight: 700;
+      color: var(--cyan);
+      align-self: end;
+    }
+
+    .visuals-col {
+      grid-area: visuals;
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+
+    .panel-title-row {
+      display: flex;
+      align-items: safe center;
+      justify-content: space-between;
+      margin-block-end: 0.55rem;
+      gap: 0.5rem;
+    }
+
+    .panel-title {
+      margin: 0;
+      font-size: 0.88rem;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      color: var(--cyan);
+    }
+
+    .canvas-stage {
+      position: relative;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: #060a13;
+      overflow: clip;
+    }
+
+    #factoryCanvas {
+      inline-size: 100%;
+      aspect-ratio: 12 / 7.5;
+      block-size: auto;
+    }
+
+    .canvas-tooltip {
+      position: absolute;
+      pointer-events: none;
+      background: rgba(9, 14, 28, 0.94);
+      border: 1px solid var(--cyan);
+      border-radius: 6px;
+      padding: 0.4rem 0.55rem;
+      font-family: var(--font-mono);
+      font-size: 0.74rem;
+      color: var(--text);
+      white-space: nowrap;
+      opacity: 0;
+      transition: opacity 100ms ease;
+      z-index: 4;
+    }
+
+    .lineage-panel {
+      grid-area: lineage;
+      display: flex;
+      flex-direction: column;
+      gap: 0.65rem;
+    }
+
+    #lineageSvg {
+      inline-size: 100%;
+      block-size: 92px;
+      background: #060a13;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+    }
+
+    .blueprint-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(135px, 1fr));
+      gap: 0.45rem;
+    }
+
+    .bp-cell {
+      border: 1px solid var(--border);
+      background: #0a1020;
+      border-radius: 6px;
+      padding: 0.38rem 0.5rem;
+      font-family: var(--font-mono);
+      font-size: 0.74rem;
+      display: flex;
+      align-items: safe center;
+      justify-content: space-between;
+      gap: 0.3rem;
+      transition: border-color 180ms ease, background 180ms ease;
+    }
+
+    .bp-cell--done {
+      border-color: var(--emerald);
+      background: rgba(16, 185, 129, 0.14);
+      color: var(--emerald);
+    }
+
+    .bp-cell--active {
+      border-color: var(--cyan);
+      background: rgba(0, 229, 255, 0.14);
+      color: var(--cyan);
+    }
+
+    .telemetry-col {
+      grid-area: telemetry;
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+
+    .mat-list {
+      display: grid;
+      gap: 0.48rem;
+    }
+
+    .mat-row {
+      display: grid;
+      grid-template-columns: 95px 1fr 112px;
+      align-items: safe center;
+      gap: 0.55rem;
+      font-family: var(--font-mono);
+      font-size: 0.78rem;
+    }
+
+    .mat-track {
+      block-size: 10px;
+      background: #070b14;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      overflow: clip;
+    }
+
+    .mat-fill {
+      block-size: 100%;
+      background: var(--emerald);
+      transition: inline-size 180ms ease, background 180ms ease;
+    }
+
+    .table-wrapper {
+      overflow: auto;
+      max-inline-size: 100%;
+      max-block-size: 260px;
+      scrollbar-gutter: stable;
+      overscroll-behavior: contain;
+      container-type: inline-size;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: #080d1a;
+    }
+
+    table {
+      inline-size: 100%;
+      border-collapse: separate;
+      border-spacing: 0;
+      font-family: var(--font-mono);
+      font-size: 0.76rem;
+    }
+
+    caption {
+      text-align: start;
+      padding: 0.4rem 0.6rem;
+      font-size: 0.74rem;
+      color: var(--muted);
+      background: #0c1326;
+      border-block-end: 1px solid var(--border);
+    }
+
+    thead {
+      position: sticky;
+      inset-block-start: 0;
+      z-index: 2;
+      background: #0d162c;
+    }
+
+    th, td {
+      padding: 0.42rem 0.55rem;
+      border-block-end: 1px solid rgba(37, 53, 89, 0.55);
+      text-align: start;
+      white-space: nowrap;
+    }
+
+    thead th {
+      color: var(--cyan);
+      font-weight: 700;
+    }
+
+    tbody th {
+      position: sticky;
+      inset-inline-start: 0;
+      background: #0d1529;
+      color: var(--text);
+      z-index: 1;
+    }
+
+    @container (width < 460px) {
+      table, thead, tbody, tr, th, td {
+        display: block;
+      }
+      thead {
+        display: none;
+      }
+      tr {
+        margin-block-end: 0.65rem;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        background: var(--panel-alt);
+      }
+      tbody th {
+        position: sticky;
+        inset-block-start: 0;
+        z-index: 2;
+        background: #1a2744;
+        border-block-end: 1px solid var(--border);
+      }
+      table {
+        --label-2: "Role";
+        --label-3: "Status";
+        --label-4: "Station";
+        --label-5: "Task";
+        --label-6: "Energy";
+        --label-7: "Done";
+      }
+      td:nth-child(2)::before { content: var(--label-2) ": "; color: var(--muted); }
+      td:nth-child(3)::before { content: var(--label-3) ": "; color: var(--muted); }
+      td:nth-child(4)::before { content: var(--label-4) ": "; color: var(--muted); }
+      td:nth-child(5)::before { content: var(--label-5) ": "; color: var(--muted); }
+      td:nth-child(6)::before { content: var(--label-6) ": "; color: var(--muted); }
+      td:nth-child(7)::before { content: var(--label-7) ": "; color: var(--muted); }
+    }
+
+    .event-log {
+      max-block-size: 215px;
+      min-block-size: 165px;
+      overflow-y: auto;
+      scrollbar-gutter: stable;
+      overscroll-behavior: contain;
+      background: #060a13;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.5rem 0.65rem;
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+    }
+
+    .evt-line {
+      padding-block: 0.14rem;
+      border-block-end: 1px dashed rgba(37, 53, 89, 0.35);
+    }
+
+    .evt-milestone { color: var(--emerald); }
+    .evt-fault     { color: var(--crimson); }
+    .evt-supply    { color: var(--amber); }
+    .evt-info      { color: var(--muted); }
+
+    .charts-panel {
+      grid-area: charts;
+    }
+
+    #telemetryChart {
+      inline-size: 100%;
+      block-size: 215px;
+      background: #060a13;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+    }
+
+    dialog#sweepDialog {
+      background: var(--panel);
+      color: var(--text);
+      border: 1px solid var(--cyan);
+      border-radius: 12px;
+      padding: 1.1rem 1.25rem;
+      max-inline-size: min(760px, 92dvw);
+      inline-size: 100%;
+      box-shadow: 0 24px 64px rgba(0, 0, 0, 0.7);
+    }
+
+    dialog#sweepDialog::backdrop {
+      background: rgba(3, 6, 14, 0.78);
+      backdrop-filter: blur(4px);
+    }
+
+    #sweepChart {
+      inline-size: 100%;
+      block-size: 190px;
+      background: #060a13;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      margin-block-start: 0.75rem;
+    }
+  </style>
+</head>
+<body>
+  <main class="app-shell">
+    <header class="panel app-header">
+      <div class="header-top">
+        <div class="brand">
+          <span class="brand-dot" aria-hidden="true"></span>
+          <h1>NEUROHIVE 1.0 // LIVE DIGITAL TWIN &amp; SWARM TELEMETRY</h1>
+        </div>
+        <div class="status-group">
+          <span id="phaseBadge" class="badge">PHASE: MANUFACTURING</span>
+          <span id="targetBadge" class="badge">TARGET: NH-B</span>
+          <span id="statusBadge" class="badge badge--running">RUNNING</span>
+        </div>
+      </div>
+
+      <div class="param-group">
+        <label class="field">Seed <input id="cfgSeed" type="number" value="42" min="1" /></label>
+        <label class="field">Gens <input id="cfgGens" type="number" value="2" min="1" max="15" /></label>
+        <label class="field">Fault Rate <input id="cfgFault" type="number" value="0.01" min="0" max="0.8" step="0.01" /></label>
+        <label class="field">Hard Fault <input id="cfgHardFault" type="number" value="0.00" min="0" max="0.5" step="0.01" /></label>
+        <label class="field">Strategy
+          <select id="cfgStrategy">
+            <option value="standard">standard</option>
+            <option value="reserved_bom">reserved_bom</option>
+            <option value="auto_resupply">auto_resupply</option>
+          </select>
+        </label>
+        <label class="field"><input id="cfgTravel" type="checkbox" /> Travel Physics</label>
+        <label class="field"><input id="cfgMaint" type="checkbox" /> MNT-01 Repair Bot</label>
+      </div>
+
+      <div class="controls-bar">
+        <button id="btnPlay" class="primary" type="button">Play</button>
+        <button id="btnStep" type="button">Step +1</button>
+        <button id="btnStep5" type="button">Step +5</button>
+        <button id="btnReset" type="button">Apply &amp; Reset</button>
+        <button id="btnFault" class="warn" type="button">Inject Fault</button>
+        <button id="btnHardFault" class="danger" type="button">Hard Fault</button>
+        <button id="btnResupply" type="button">Supply Drop (+1 BOM)</button>
+        <button id="btnSweep" type="button">Sweep Benchmark</button>
+        <button id="btnExport" type="button">Download JSON</button>
+
+        <label class="speed-control">
+          Tick Interval: <span id="speedLabel">180ms</span>
+          <input id="speedSlider" type="range" min="40" max="600" value="180" step="20" />
+        </label>
+      </div>
+    </header>
+
+    <section class="kpi-strip" aria-label="Simulation Key Metrics">
+      <article class="kpi-card">
+        <span class="kpi-label">Simulation Tick</span>
+        <span id="kpiTick" class="kpi-val">0 / 2000</span>
+      </article>
+      <article class="kpi-card">
+        <span class="kpi-label">Progress</span>
+        <span id="kpiProgress" class="kpi-val">0.0%</span>
+      </article>
+      <article class="kpi-card">
+        <span class="kpi-label">Replications</span>
+        <span id="kpiReplicas" class="kpi-val">0 / 2</span>
+      </article>
+      <article class="kpi-card">
+        <span class="kpi-label">Faults (Rec / Hard)</span>
+        <span id="kpiFaults" class="kpi-val">0 / 0</span>
+      </article>
+      <article class="kpi-card">
+        <span class="kpi-label">Swarm Energy Used</span>
+        <span id="kpiEnergy" class="kpi-val">0.0</span>
+      </article>
+    </section>
+
+    <section class="panel visuals-col panel-isolated">
+      <div class="panel-title-row">
+        <h2 class="panel-title">2D Spatial Factory Floor</h2>
+        <span id="activeTasksSummary" class="badge">Active Tasks: 0</span>
+      </div>
+      <div class="canvas-stage">
+        <canvas id="factoryCanvas" width="900" height="560"></canvas>
+        <div id="canvasTooltip" class="canvas-tooltip" role="status"></div>
+      </div>
+    </section>
+
+    <section class="panel telemetry-col panel-isolated">
+      <div>
+        <div class="panel-title-row">
+          <h2 class="panel-title">Material Core Ledger</h2>
+          <span class="badge" id="strategyBadge">standard</span>
+        </div>
+        <div id="materialList" class="mat-list"></div>
+      </div>
+
+      <div>
+        <div class="panel-title-row">
+          <h2 class="panel-title">SwarmCore Agent Roster</h2>
+        </div>
+        <div tabindex="0" role="region" aria-labelledby="agent-table-caption" class="table-wrapper">
+          <table>
+            <caption id="agent-table-caption">Live agent status, station assignment, energy, and completed tasks</caption>
+            <thead>
+              <tr>
+                <th>Agent</th>
+                <th>Role</th>
+                <th>Status</th>
+                <th>Station</th>
+                <th>Task</th>
+                <th>Energy</th>
+                <th>Done</th>
+              </tr>
+            </thead>
+            <tbody id="agentTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div>
+        <div class="panel-title-row">
+          <h2 class="panel-title">Live Hive-Net Event Trace</h2>
+          <select id="eventFilter" aria-label="Filter events">
+            <option value="ALL">ALL</option>
+            <option value="FAULTS">FAULTS</option>
+            <option value="MILESTONES">MILESTONES</option>
+            <option value="SUPPLY">SUPPLY</option>
+          </select>
+        </div>
+        <div id="eventLog" class="event-log" aria-live="polite"></div>
+      </div>
+    </section>
+
+    <section class="panel lineage-panel panel-isolated">
+      <div class="panel-title-row">
+        <h2 class="panel-title">Hive Lineage &amp; Digital Twin Blueprint</h2>
+        <span id="bpTargetLabel" class="badge">Inspecting: NH-B</span>
+      </div>
+      <svg id="lineageSvg" viewBox="0 0 900 92" preserveAspectRatio="xMinYMid meet"></svg>
+      <div id="blueprintGrid" class="blueprint-grid"></div>
+    </section>
+
+    <section class="panel charts-panel panel-isolated">
+      <div class="panel-title-row">
+        <h2 class="panel-title">Live Telemetry History</h2>
+        <span class="badge">Cyan: Util % | Emerald: Stock % | Amber: Avg Energy %</span>
+      </div>
+      <canvas id="telemetryChart" width="640" height="215"></canvas>
+    </section>
+  </main>
+
+  <dialog id="sweepDialog" aria-labelledby="sweepTitle">
+    <div class="panel-title-row">
+      <h2 id="sweepTitle" class="panel-title">Fault-Rate Parameter Sweep Benchmark</h2>
+      <button id="btnCloseSweep" type="button">Close</button>
+    </div>
+    <p id="sweepMeta" style="margin:0 0 0.6rem; color: var(--muted); font-size:0.84rem;"></p>
+    <div tabindex="0" role="region" aria-labelledby="sweep-table-caption" class="table-wrapper" style="max-block-size:210px;">
+      <table>
+        <caption id="sweep-table-caption">Multi-seed makespan and reliability comparison</caption>
+        <thead>
+          <tr>
+            <th>Fault Rate</th>
+            <th>Success</th>
+            <th>Avg Ticks</th>
+            <th>Min-Max</th>
+            <th>Avg Faults</th>
+            <th>Util %</th>
+            <th>Avg Energy</th>
+          </tr>
+        </thead>
+        <tbody id="sweepTableBody"></tbody>
+      </table>
+    </div>
+    <canvas id="sweepChart" width="700" height="190"></canvas>
+  </dialog>
+
+  <script>
+    const ROLE_COLORS = {
+      fabricator: "#22d3ee",
+      systems: "#a78bfa",
+      assembler: "#34d399",
+      inspector: "#fb7185",
+      maintenance: "#f59e0b"
+    };
+
+    const STATUS_RING = {
+      working: "#00e5ff",
+      moving: "#a78bfa",
+      repairing: "#f59e0b",
+      offline: "#ef4444",
+      idle: "#10b981"
+    };
+
+    let state = null;
+    let selectedHiveId = null;
+    let playing = false;
+    let timerId = null;
+    let animPhase = 0;
+    let visualAgents = {};
+    let particles = [];
+    let prevCompletedTasks = {};
+    let prevCommissionedCount = 1;
+    let hoveredPointer = null;
+
+    const el = (id) => document.getElementById(id);
+    const canvas = el("factoryCanvas");
+    const ctx = canvas.getContext("2d");
+    const tooltip = el("canvasTooltip");
+
+    async function api(path, method = "GET", body = null) {
+      const opts = { method, headers: {} };
+      if (body !== null) {
+        opts.headers["Content-Type"] = "application/json";
+        opts.body = JSON.stringify(body);
+      }
+      const res = await fetch(path, opts);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: res.statusText }));
+        throw new Error(err.error || "API error");
+      }
+      return res.json();
+    }
+
+    function syncVisualState(nextState, snap = false) {
+      const prevState = state;
+      state = nextState;
+
+      // Spawn particles when tasks complete or hives commission
+      if (prevState) {
+        for (const a of state.agents) {
+          const oldCount = prevCompletedTasks[a.agent_id] ?? a.tasks_completed;
+          if (a.tasks_completed > oldCount) {
+            spawnBurst(a.x, a.y, ROLE_COLORS[a.role] || "#00e5ff", 14);
+          }
+          if (a.fault_flash) {
+            spawnBurst(a.x, a.y, "#ef4444", 16);
+          }
+          prevCompletedTasks[a.agent_id] = a.tasks_completed;
+        }
+        const commCount = state.hives.filter((h) => h.status === "commissioned").length;
+        if (commCount > prevCommissionedCount) {
+          const pad = state.grid.stations.HIVE_PAD;
+          spawnBurst(pad.x, pad.y, "#10b981", 28);
+        }
+        prevCommissionedCount = commCount;
+      } else {
+        for (const a of state.agents) {
+          prevCompletedTasks[a.agent_id] = a.tasks_completed;
+        }
+        prevCommissionedCount = state.hives.filter((h) => h.status === "commissioned").length;
+      }
+
+      const activeIds = new Set();
+      for (const a of state.agents) {
+        activeIds.add(a.agent_id);
+        if (snap || !visualAgents[a.agent_id]) {
+          visualAgents[a.agent_id] = { x: a.x, y: a.y };
+        }
+      }
+      for (const k of Object.keys(visualAgents)) {
+        if (!activeIds.has(k)) delete visualAgents[k];
+      }
+
+      if (!selectedHiveId || !state.hives.some((h) => h.hive_id === selectedHiveId)) {
+        selectedHiveId = state.current_target || state.hives[state.hives.length - 1].hive_id;
+      }
+      renderDOM();
+    }
+
+    function spawnBurst(gx, gy, color, count) {
+      for (let i = 0; i < count; i++) {
+        const angle = (Math.PI * 2 * i) / count + Math.random() * 0.4;
+        const speed = 0.04 + Math.random() * 0.08;
+        particles.push({
+          gx, gy,
+          vx: Math.cos(angle) * speed,
+          vy: Math.sin(angle) * speed,
+          life: 1.0,
+          color
+        });
+      }
+    }
+
+    function renderDOM() {
+      if (!state) return;
+      el("phaseBadge").textContent = `PHASE: ${state.phase.toUpperCase()}`;
+      el("targetBadge").textContent = `TARGET: ${state.current_target || "COMPLETE"}`;
+      const stBadge = el("statusBadge");
+      stBadge.textContent = state.status.toUpperCase();
+      stBadge.className = `badge badge--${state.status}`;
+
+      el("kpiTick").textContent = `${state.tick} / ${state.max_ticks}`;
+      el("kpiProgress").textContent = `${state.progress_pct.toFixed(1)}%`;
+      el("kpiReplicas").textContent = `${state.completed_replications} / ${state.requested_replications}`;
+      el("kpiFaults").textContent = `${state.total_recoverable_faults} / ${state.total_hard_faults}`;
+      el("kpiEnergy").textContent = state.total_energy_used.toFixed(1);
+      el("strategyBadge").textContent = state.resource_strategy;
+
+      const activeTasks = state.tasks.filter((t) => t.status === "running").length;
+      el("activeTasksSummary").textContent = `Active Tasks: ${activeTasks} / ${state.tasks.length}`;
+
+      renderMaterials();
+      renderAgentTable();
+      renderLineage();
+      renderBlueprint();
+      renderEvents();
+      renderTelemetryChart();
+
+      if (state.status !== "running" && playing) {
+        setPlaying(false);
+      }
+    }
+
+    function renderMaterials() {
+      const root = el("materialList");
+      root.innerHTML = "";
+      for (const [name, info] of Object.entries(state.materials)) {
+        const total = Math.max(1, info.initial + info.resupplied);
+        const pct = Math.max(0, Math.min(100, (info.remaining / total) * 100));
+        const color = pct > 35 ? "var(--emerald)" : (pct > 15 ? "var(--amber)" : "var(--crimson)");
+        const row = document.createElement("div");
+        row.className = "mat-row";
+        row.innerHTML = `
+          <span>${name.toUpperCase()}</span>
+          <div class="mat-track"><div class="mat-fill" style="inline-size:${pct.toFixed(1)}%; background:${color};"></div></div>
+          <span style="text-align:end; color:var(--muted);">${info.remaining} rem / ${info.used} u</span>
+        `;
+        root.appendChild(row);
+      }
+    }
+
+    function renderAgentTable() {
+      const tbody = el("agentTableBody");
+      tbody.innerHTML = "";
+      for (const a of state.agents) {
+        const tr = document.createElement("tr");
+        const stCol = STATUS_RING[a.status] || "var(--text)";
+        tr.innerHTML = `
+          <th scope="row">${a.agent_id}</th>
+          <td>${a.role}</td>
+          <td style="color:${stCol}; font-weight:700;">${a.status.toUpperCase()}</td>
+          <td>${a.station}</td>
+          <td>${a.current_task || "-"}</td>
+          <td>${a.energy.toFixed(0)}%</td>
+          <td>${a.tasks_completed}</td>
+        `;
+        tbody.appendChild(tr);
+      }
+    }
+
+    function renderLineage() {
+      const svg = el("lineageSvg");
+      const hives = state.hives;
+      const stepX = Math.min(145, Math.max(92, 820 / Math.max(1, hives.length)));
+      let out = "";
+      hives.forEach((h, i) => {
+        const cx = 56 + i * stepX;
+        const cy = 46;
+        if (i > 0) {
+          const prevX = 56 + (i - 1) * stepX;
+          out += `<line x1="${prevX + 36}" y1="${cy}" x2="${cx - 38}" y2="${cy}" stroke="#00e5ff" stroke-width="2" stroke-dasharray="4 3" />`;
+          out += `<polygon points="${cx - 38},${cy - 4} ${cx - 30},${cy} ${cx - 38},${cy + 4}" fill="#00e5ff" />`;
+        }
+        const stroke = h.status === "commissioned" ? "#10b981" : (state.status === "failed" ? "#ef4444" : "#00e5ff");
+        const activeRing = h.hive_id === selectedHiveId ? `stroke-width="3"` : `stroke-width="1.6"`;
+        const sub = h.commissioned_tick !== null ? `t=${h.commissioned_tick}` : h.status;
+        out += `
+          <g class="hive-node" data-hive="${h.hive_id}" style="cursor:pointer;">
+            <rect x="${cx - 34}" y="${cy - 22}" width="68" height="44" rx="7" fill="#121d36" stroke="${stroke}" ${activeRing} />
+            <text x="${cx}" y="${cy - 3}" text-anchor="middle" fill="#e2e8f0" font-family="Consolas,monospace" font-size="12" font-weight="700">${h.hive_id}</text>
+            <text x="${cx}" y="${cy + 13}" text-anchor="middle" fill="${stroke}" font-family="Consolas,monospace" font-size="10">${sub}</text>
+          </g>
+        `;
+      });
+      svg.innerHTML = out;
+      svg.querySelectorAll(".hive-node").forEach((node) => {
+        node.addEventListener("click", () => {
+          selectedHiveId = node.getAttribute("data-hive");
+          renderLineage();
+          renderBlueprint();
+        });
+      });
+    }
+
+    function renderBlueprint() {
+      const hive = state.hives.find((h) => h.hive_id === selectedHiveId) || state.hives[state.hives.length - 1];
+      el("bpTargetLabel").textContent = `Inspecting: ${hive.hive_id} (Gen ${hive.generation})`;
+      const running = new Set(state.tasks.filter((t) => t.status === "running").map((t) => t.name));
+      const entries = [
+        ...Object.entries(hive.components_built),
+        ...Object.entries(hive.assembly_progress),
+        ...Object.entries(hive.verification_progress)
+      ];
+      const grid = el("blueprintGrid");
+      grid.innerHTML = "";
+      for (const [name, done] of entries) {
+        const isTarget = hive.hive_id === state.current_target;
+        const isActive = isTarget && running.has(name);
+        const cell = document.createElement("div");
+        cell.className = `bp-cell ${done ? "bp-cell--done" : (isActive ? "bp-cell--active" : "")}`;
+        cell.innerHTML = `<span>${name.replaceAll("_", " ")}</span><span>${done ? "OK" : (isActive ? "RUN" : "..")}</span>`;
+        grid.appendChild(cell);
+      }
+    }
+
+    function renderEvents() {
+      const filter = el("eventFilter").value;
+      const box = el("eventLog");
+      const lines = [];
+      for (const ev of state.events) {
+        const name = ev.event;
+        if (filter === "FAULTS" && !name.includes("fault") && !name.includes("failure")) continue;
+        if (filter === "MILESTONES" && !["replication_started", "manufacturing_complete", "assembly_complete", "hive_commissioned"].includes(name)) continue;
+        if (filter === "SUPPLY" && !name.includes("supply") && !name.includes("bom")) continue;
+
+        let cls = "evt-info";
+        if (name.includes("fault") || name.includes("failure")) cls = "evt-fault";
+        else if (name.includes("complete") || name.includes("commissioned") || name.includes("repaired")) cls = "evt-milestone";
+        else if (name.includes("supply") || name.includes("bom")) cls = "evt-supply";
+
+        const extras = Object.entries(ev)
+          .filter(([k]) => k !== "tick" && k !== "event")
+          .map(([k, v]) => `${k}=${typeof v === "object" ? JSON.stringify(v) : v}`)
+          .join(" ");
+        lines.push(`<div class="evt-line ${cls}">[t=${String(ev.tick).padStart(3, "0")}] <strong>${name}</strong> ${extras}</div>`);
+      }
+      box.innerHTML = lines.join("");
+      box.scrollTop = box.scrollHeight;
+    }
+
+    function renderTelemetryChart() {
+      const chart = el("telemetryChart");
+      const c = chart.getContext("2d");
+      const w = chart.width;
+      const h = chart.height;
+      c.clearRect(0, 0, w, h);
+
+      c.strokeStyle = "#16213a";
+      c.lineWidth = 1;
+      for (let i = 1; i < 4; i++) {
+        const y = (h / 4) * i;
+        c.beginPath();
+        c.moveTo(0, y);
+        c.lineTo(w, y);
+        c.stroke();
+      }
+
+      const hist = state.history;
+      if (!hist || hist.length < 2) return;
+      const drawSeries = (key, color) => {
+        c.beginPath();
+        c.strokeStyle = color;
+        c.lineWidth = 2;
+        hist.forEach((pt, idx) => {
+          const x = 14 + (idx / Math.max(1, hist.length - 1)) * (w - 28);
+          const val = Math.max(0, Math.min(100, pt[key] ?? 0));
+          const y = h - 16 - (val / 100) * (h - 32);
+          if (idx === 0) c.moveTo(x, y);
+          else c.lineTo(x, y);
+        });
+        c.stroke();
+      };
+      drawSeries("busy_pct", "#00e5ff");
+      drawSeries("stock_pct", "#10b981");
+      drawSeries("avg_energy", "#f59e0b");
+    }
+
+    function drawFactoryFrame() {
+      animPhase += 0.06;
+      if (!state) {
+        requestAnimationFrame(drawFactoryFrame);
+        return;
+      }
+
+      const w = canvas.width;
+      const h = canvas.height;
+      const padX = 56;
+      const padY = 44;
+      const uw = w - padX * 2;
+      const uh = h - padY * 2;
+      const toPx = (gx, gy) => [
+        padX + (gx / state.grid.width) * uw,
+        padY + (gy / state.grid.height) * uh
+      ];
+
+      ctx.clearRect(0, 0, w, h);
+
+      // Floor grid
+      ctx.strokeStyle = "#101a30";
+      ctx.lineWidth = 1;
+      for (let x = 0; x <= state.grid.width; x++) {
+        const [px] = toPx(x, 0);
+        ctx.beginPath(); ctx.moveTo(px, padY); ctx.lineTo(px, h - padY); ctx.stroke();
+      }
+      for (let y = 0; y <= state.grid.height; y++) {
+        const [, py] = toPx(0, y);
+        ctx.beginPath(); ctx.moveTo(padX, py); ctx.lineTo(w - padX, py); ctx.stroke();
+      }
+
+      // Animated logistics links
+      const links = [
+        ["DEPOT", "FAB_BAY"], ["DEPOT", "SYS_LAB"],
+        ["FAB_BAY", "ASM_DOCK"], ["SYS_LAB", "ASM_DOCK"],
+        ["ASM_DOCK", "QA_CELL"], ["QA_CELL", "HIVE_PAD"],
+        ["CHARGER", "DEPOT"]
+      ];
+      ctx.save();
+      ctx.setLineDash([7, 7]);
+      ctx.lineDashOffset = -animPhase * 10;
+      ctx.strokeStyle = "#223358";
+      ctx.lineWidth = 2;
+      for (const [s1, s2] of links) {
+        const [x1, y1] = toPx(state.grid.stations[s1].x, state.grid.stations[s1].y);
+        const [x2, y2] = toPx(state.grid.stations[s2].x, state.grid.stations[s2].y);
+        ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+      }
+      ctx.restore();
+
+      const activeStations = new Set(
+        state.agents.filter((a) => a.status === "working" || a.status === "repairing").map((a) => a.station)
+      );
+
+      // Stations
+      for (const [sid, info] of Object.entries(state.grid.stations)) {
+        const [px, py] = toPx(info.x, info.y);
+        const active = activeStations.has(sid);
+        const pulse = active ? Math.sin(animPhase * 2.4) * 4 : 0;
+        const bw = 112 + pulse;
+        const bh = 68 + pulse * 0.6;
+        ctx.fillStyle = active ? "rgba(18, 30, 58, 0.96)" : "rgba(13, 21, 41, 0.85)";
+        ctx.strokeStyle = active ? info.color : "#2b3e66";
+        ctx.lineWidth = active ? 2.2 : 1.2;
+        ctx.beginPath();
+        ctx.roundRect(px - bw / 2, py - bh / 2, bw, bh, 10);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.fillStyle = info.color;
+        ctx.font = "700 11px Consolas, monospace";
+        ctx.textAlign = "center";
+        ctx.fillText(sid, px, py - bh / 2 + 16);
+
+        ctx.fillStyle = "#94a3b8";
+        ctx.font = "11px Segoe UI, sans-serif";
+        ctx.fillText(info.label, px, py + bh / 2 + 16);
+      }
+
+      // Smoothly interpolate visual agent coords and separate shared positions
+      const groups = {};
+      for (const a of state.agents) {
+        const v = visualAgents[a.agent_id] || { x: a.x, y: a.y };
+        v.x += (a.x - v.x) * 0.22;
+        v.y += (a.y - v.y) * 0.22;
+        const key = `${v.x.toFixed(1)},${v.y.toFixed(1)}`;
+        (groups[key] = groups[key] || []).push({ agent: a, v });
+      }
+
+      let hoverMatch = null;
+      for (const list of Object.values(groups)) {
+        list.forEach(({ agent: a, v }, idx) => {
+          let [px, py] = toPx(v.x, v.y);
+          if (list.length > 1) {
+            px += (idx - (list.length - 1) / 2) * 38;
+          }
+          const st = state.grid.stations[a.station];
+          const [sx, sy] = toPx(st.x, st.y);
+
+          if (a.status === "working" || a.status === "repairing") {
+            ctx.save();
+            ctx.strokeStyle = ROLE_COLORS[a.role] || "#00e5ff";
+            ctx.lineWidth = 2;
+            ctx.setLineDash([4, 4]);
+            ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(sx, sy); ctx.stroke();
+            ctx.restore();
+          }
+
+          const ring = a.fault_flash ? "#ef4444" : (STATUS_RING[a.status] || "#94a3b8");
+          ctx.beginPath();
+          ctx.arc(px, py, 20, 0, Math.PI * 2);
+          ctx.strokeStyle = ring;
+          ctx.lineWidth = 2.5;
+          ctx.stroke();
+
+          ctx.beginPath();
+          ctx.arc(px, py, 16, 0, Math.PI * 2);
+          ctx.fillStyle = ROLE_COLORS[a.role] || "#00e5ff";
+          ctx.fill();
+
+          ctx.fillStyle = "#040812";
+          ctx.font = "700 10px Consolas, monospace";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillText(a.agent_id.split("-")[0], px, py);
+
+          ctx.fillStyle = "#e2e8f0";
+          ctx.font = "700 11px Consolas, monospace";
+          ctx.textBaseline = "alphabetic";
+          ctx.fillText(a.agent_id, px, py - 24);
+
+          // Energy mini-bar
+          const ebW = 34;
+          ctx.fillStyle = "#1e293b";
+          ctx.fillRect(px - ebW / 2, py + 23, ebW, 5);
+          ctx.fillStyle = a.energy > 50 ? "#10b981" : (a.energy > 20 ? "#f59e0b" : "#ef4444");
+          ctx.fillRect(px - ebW / 2, py + 23, Math.max(2, (a.energy / 100) * ebW), 5);
+
+          if (hoveredPointer) {
+            const d = Math.hypot(hoveredPointer.x - px, hoveredPointer.y - py);
+            if (d < 24) {
+              hoverMatch = { agent: a, px, py };
+            }
+          }
+        });
+      }
+
+      // Update and render particles
+      particles = particles.filter((p) => p.life > 0.04);
+      for (const p of particles) {
+        p.gx += p.vx;
+        p.gy += p.vy;
+        p.life *= 0.91;
+        const [px, py] = toPx(p.gx, p.gy);
+        ctx.globalAlpha = p.life;
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.arc(px, py, 3, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+
+      if (hoverMatch) {
+        const a = hoverMatch.agent;
+        tooltip.style.opacity = "1";
+        tooltip.style.left = `${Math.min(canvas.clientWidth - 190, (hoverMatch.px / canvas.width) * canvas.clientWidth + 14)}px`;
+        tooltip.style.top = `${Math.max(8, (hoverMatch.py / canvas.height) * canvas.clientHeight - 36)}px`;
+        tooltip.innerHTML = `${a.agent_id} (${a.role})<br>status: ${a.status} | task: ${a.current_task || "none"}<br>energy: ${a.energy.toFixed(1)}% | dist: ${a.distance_traveled.toFixed(1)}`;
+      } else {
+        tooltip.style.opacity = "0";
+      }
+
+      requestAnimationFrame(drawFactoryFrame);
+    }
+
+    canvas.addEventListener("mousemove", (e) => {
+      const rect = canvas.getBoundingClientRect();
+      hoveredPointer = {
+        x: ((e.clientX - rect.left) / rect.width) * canvas.width,
+        y: ((e.clientY - rect.top) / rect.height) * canvas.height
+      };
+    });
+    canvas.addEventListener("mouseleave", () => {
+      hoveredPointer = null;
+      tooltip.style.opacity = "0";
+    });
+
+    function gatherParams() {
+      return {
+        seed: Number(el("cfgSeed").value),
+        generations: Number(el("cfgGens").value),
+        fault_rate: Number(el("cfgFault").value),
+        permanent_fault_rate: Number(el("cfgHardFault").value),
+        resource_strategy: el("cfgStrategy").value,
+        enable_travel_ticks: el("cfgTravel").checked,
+        maintenance_bot: el("cfgMaint").checked
+      };
+    }
+
+    function setPlaying(nextPlay) {
+      playing = nextPlay;
+      el("btnPlay").textContent = playing ? "Pause" : "Play";
+      if (timerId) {
+        clearInterval(timerId);
+        timerId = null;
+      }
+      if (playing) {
+        const interval = Number(el("speedSlider").value);
+        timerId = setInterval(async () => {
+          if (!state || state.status !== "running") {
+            setPlaying(false);
+            return;
+          }
+          const next = await api("/api/step", "POST", { count: 1 });
+          syncVisualState(next);
+        }, interval);
+      }
+    }
+
+    el("btnPlay").addEventListener("click", async () => {
+      if (state && state.status !== "running") {
+        const next = await api("/api/reset", "POST", gatherParams());
+        syncVisualState(next, true);
+      }
+      setPlaying(!playing);
+    });
+
+    el("btnStep").addEventListener("click", async () => {
+      setPlaying(false);
+      syncVisualState(await api("/api/step", "POST", { count: 1 }));
+    });
+
+    el("btnStep5").addEventListener("click", async () => {
+      setPlaying(false);
+      syncVisualState(await api("/api/step", "POST", { count: 5 }));
+    });
+
+    el("btnReset").addEventListener("click", async () => {
+      setPlaying(false);
+      try {
+        syncVisualState(await api("/api/reset", "POST", gatherParams()), true);
+      } catch (err) {
+        alert(err.message);
+      }
+    });
+
+    el("btnFault").addEventListener("click", async () => {
+      const res = await api("/api/inject-fault", "POST", { permanent: false });
+      syncVisualState(res.state);
+    });
+
+    el("btnHardFault").addEventListener("click", async () => {
+      const res = await api("/api/inject-fault", "POST", { permanent: true });
+      syncVisualState(res.state);
+    });
+
+    el("btnResupply").addEventListener("click", async () => {
+      const res = await api("/api/resupply", "POST", { multiplier: 1 });
+      syncVisualState(res.state);
+    });
+
+    el("speedSlider").addEventListener("input", () => {
+      el("speedLabel").textContent = `${el("speedSlider").value}ms`;
+      if (playing) setPlaying(true);
+    });
+
+    el("eventFilter").addEventListener("change", renderEvents);
+
+    el("btnExport").addEventListener("click", async () => {
+      const report = await api("/api/report");
+      const blob = new Blob([JSON.stringify(report, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `neurohive_seed${report.seed}_t${report.ticks}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    });
+
+    const sweepDialog = el("sweepDialog");
+    el("btnCloseSweep").addEventListener("click", () => sweepDialog.close());
+    el("btnSweep").addEventListener("click", async () => {
+      const sweep = await api("/api/sweep", "POST", gatherParams());
+      el("sweepMeta").textContent = `Generations=${sweep.generations} | Seeds=[${sweep.seeds.join(", ")}] | Strategy=${sweep.resource_strategy}`;
+      const tbody = el("sweepTableBody");
+      tbody.innerHTML = "";
+      for (const row of sweep.summary) {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <th scope="row">${(row.fault_rate * 100).toFixed(0)}%</th>
+          <td>${row.success_rate.toFixed(1)}%</td>
+          <td>${row.avg_ticks.toFixed(1)}</td>
+          <td>${row.min_ticks}-${row.max_ticks}</td>
+          <td>${row.avg_faults.toFixed(2)}</td>
+          <td>${row.avg_utilisation_pct.toFixed(1)}%</td>
+          <td>${row.avg_energy_used.toFixed(1)}</td>
+        `;
+        tbody.appendChild(tr);
+      }
+
+      const sc = el("sweepChart");
+      const sctx = sc.getContext("2d");
+      sctx.clearRect(0, 0, sc.width, sc.height);
+      const maxT = Math.max(...sweep.summary.map((r) => r.avg_ticks), 1);
+      const barW = 74;
+      const gap = (sc.width - 100 - barW * sweep.summary.length) / Math.max(1, sweep.summary.length - 1);
+      sweep.summary.forEach((row, idx) => {
+        const x = 50 + idx * (barW + gap);
+        const bh = (row.avg_ticks / maxT) * (sc.height - 60);
+        const y = sc.height - 30 - bh;
+        sctx.fillStyle = "#00e5ff";
+        sctx.fillRect(x, y, barW, bh);
+        sctx.fillStyle = "#e2e8f0";
+        sctx.font = "700 12px Consolas, monospace";
+        sctx.textAlign = "center";
+        sctx.fillText(`${row.avg_ticks.toFixed(1)}t`, x + barW / 2, y - 8);
+        sctx.fillStyle = "#94a3b8";
+        sctx.fillText(`${(row.fault_rate * 100).toFixed(0)}%`, x + barW / 2, sc.height - 10);
+      });
+      sweepDialog.showModal();
+    });
+
+    (async () => {
+      const initial = await api("/api/state");
+      syncVisualState(initial, true);
+      requestAnimationFrame(drawFactoryFrame);
+    })();
+  </script>
+</body>
+</html>
